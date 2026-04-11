@@ -38,53 +38,94 @@ class SpliceAIContext:
     exon_end_in_sl: int
 
 
+def _import_spliceai_class():
+    """Import the SpliceAI nn.Module class without triggering pysam.
+
+    `openspliceai.train_base.openspliceai` is a pure-torch module with no
+    pysam dependency, so Windows users can `pip install openspliceai --no-deps`
+    (then install only the runtime deps this project already pulls in) and
+    still reach this class.
+    """
+    try:
+        from openspliceai.train_base.openspliceai import SpliceAI  # type: ignore
+        return SpliceAI
+    except ImportError as e:
+        raise RuntimeError(
+            "Could not import `openspliceai.train_base.openspliceai.SpliceAI`. "
+            "Install with `pip install openspliceai --no-deps` on Windows "
+            "(pysam has no Windows wheels), or `pip install openspliceai` on "
+            "Linux/macOS."
+        ) from e
+
+
 def setup_spliceai(
     threads: Optional[int] = None,
+    weights_dir: Optional[Path] = None,
 ) -> tuple[list[Any], Any]:
     """Load the OpenSpliceAI MANE-10000nt 5-model ensemble on CPU.
 
-    Returns (models, device). The models are in eval mode with gradients
-    disabled. Threads default to half of available CPU cores.
+    Weights are auto-downloaded to ~/.oligoclaude/spliceai/mane_10000nt/
+    on first use. The SpliceAI class is imported from
+    `openspliceai.train_base.openspliceai`, which is pysam-free — users
+    on Windows can install openspliceai with `--no-deps`.
+
+    Returns (models, device). Models are in eval mode with gradients disabled.
     """
     import torch
+
+    from .spliceai_fetch import ensure_spliceai_weights
 
     torch.set_num_threads(threads or max(1, (os.cpu_count() or 2) // 2))
     torch.set_grad_enabled(False)
     device = torch.device("cpu")
 
-    models: list[Any] = []
-    last_err: Optional[Exception] = None
-
-    try:
-        from openspliceai.predict.utils import (
-            load_pytorch_models,
-            initialize_constants,
+    weights_dir = ensure_spliceai_weights(weights_dir)
+    pt_files = sorted(Path(weights_dir).glob("*.pt"))
+    if not pt_files:
+        raise RuntimeError(
+            f"No .pt weight files found in {weights_dir} after download."
         )
 
-        consts = initialize_constants(flanking_size=CL_MAX)
-        models_obj, _ = load_pytorch_models(None, device, consts.get("SL", SL), CL_MAX)
-        if isinstance(models_obj, (list, tuple)):
-            models = list(models_obj)
-        else:
-            models = [models_obj]
-    except Exception as e:
-        last_err = e
+    SpliceAI = _import_spliceai_class()
+
+    models: list[Any] = []
+    for pt in pt_files:
+        model = _instantiate_spliceai(SpliceAI)
+        state = torch.load(pt, map_location=device)
+        if isinstance(state, dict) and "state_dict" in state:
+            state = state["state_dict"]
         try:
-            from openspliceai.predict import load_models  # type: ignore
-
-            models = list(load_models(flanking_size=CL_MAX, device=device))
-        except Exception as e2:
-            raise RuntimeError(
-                "Could not load OpenSpliceAI models. Install with "
-                "`pip install openspliceai` and ensure MANE-10000nt weights "
-                f"are downloaded. Last errors: {last_err!r}, {e2!r}"
-            ) from e2
-
-    for m in models:
-        m.eval()
-        m.to(device)
+            model.load_state_dict(state)
+        except RuntimeError:
+            # Tolerate minor key-prefix differences (e.g. `module.`).
+            stripped = {k.replace("module.", "", 1): v for k, v in state.items()}
+            model.load_state_dict(stripped)
+        model.eval()
+        model.to(device)
+        models.append(model)
 
     return models, device
+
+
+def _instantiate_spliceai(SpliceAI_cls):
+    """Instantiate the SpliceAI module with the MANE-10000nt architecture.
+
+    Tries the known constructor signatures across openspliceai versions.
+    """
+    for kwargs in (
+        {"L": CL_MAX},
+        {"L": CL_MAX, "W": None, "AR": None},
+        {"flanking_size": CL_MAX},
+        {},
+    ):
+        try:
+            return SpliceAI_cls(**kwargs)
+        except TypeError:
+            continue
+    raise RuntimeError(
+        "Could not instantiate SpliceAI class — unknown constructor signature. "
+        "Please report the openspliceai version you have installed."
+    )
 
 
 def _build_base_tensor(
@@ -161,12 +202,10 @@ def score_asos_spliceai(
     where `ref`/`alt` are (SL,) per-position donor+acceptor probability sums
     for the reference and variant respectively.
 
-    `candidates[i].position` is the 0-based offset within the scan region
-    (variant_interval), so absolute genomic position =
-        variant_interval_start_genomic + candidates[i].position.
+    `candidates[i].position` is the 0-based offset within `ref_seq`, and
+    `variant_interval_start_genomic` is the genomic position of ref_seq[0],
+    so absolute genomic position = variant_interval_start_genomic + position.
     """
-    import torch
-
     if models is None:
         models, _ = setup_spliceai(cfg.spliceai_threads)
 

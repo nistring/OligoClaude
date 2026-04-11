@@ -34,9 +34,9 @@ def enumerate_sliding(
     """Sliding-window ASO enumeration across [start_rel, end_rel) within ref_seq.
 
     For each window start position, the genomic target is ref_seq[i:i+aso_length]
-    and the antisense ASO drug sequence is its reverse complement. `position` is
-    stored as the offset relative to start_rel so downstream BED coordinates use
-    variant_interval.start as the anchor.
+    and the antisense ASO drug sequence is its reverse complement. `position`
+    is stored as the offset within `ref_seq` (so callers anchor BED and
+    scoring windows at ref_seq[0]).
     """
     candidates: list[AsoCandidate] = []
     last = end_rel - aso_length
@@ -48,7 +48,7 @@ def enumerate_sliding(
                 aso_id=f"win_{i - start_rel}",
                 aso_sequence_antisense=antisense,
                 genomic_target_seq=target,
-                position=i - start_rel,
+                position=i,
                 length=aso_length,
             )
         )
@@ -71,9 +71,10 @@ def enumerate_from_experimental(
     the genomic target, then searched within the scan region of `ref_seq`.
     Every occurrence produces one AsoCandidate (rare duplicates get suffixed IDs).
 
-    Coordinates `variant_interval_*_rel` are offsets within the `ref_seq`
-    (which covers the full resized interval). Candidates are only kept if
-    they fall entirely inside the scan region.
+    Coordinates `variant_interval_*_rel` are offsets within `ref_seq` and
+    constrain the search range. `candidate.position` is stored as the
+    offset within `ref_seq` (not scan-relative), so callers should anchor
+    BED and scoring windows at ref_seq[0].
     """
     candidates: list[AsoCandidate] = []
     for _, row in exp_df.iterrows():
@@ -99,7 +100,7 @@ def enumerate_from_experimental(
                     aso_id=f"{exp_id}{suffix}",
                     aso_sequence_antisense=antisense,
                     genomic_target_seq=target,
-                    position=pos - variant_interval_start_rel,
+                    position=pos,
                     length=length,
                     measured=measured,
                     exon_label=exon_label,

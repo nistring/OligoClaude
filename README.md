@@ -9,15 +9,48 @@ Exposed three ways:
 
 ## Install
 
+### Linux / macOS
+
 ```bash
 git clone <this-repo>
 cd OligoClaude
-pip install -e .
+pip install -e ".[spliceai]"          # AlphaGenome + SpliceAI
+pip install -e .                       # AlphaGenome only (skip SpliceAI)
 ```
+
+### Windows
+
+The SpliceAI stack (`openspliceai`) transitively depends on `pysam`, which has
+no Windows wheels. Install the SpliceAI model code without its pysam-dependent
+CLI:
+
+```powershell
+git clone <this-repo>
+cd OligoClaude
+pip install openspliceai --no-deps     # pulls the pure-torch model class only
+pip install -e .                       # all other deps
+```
+
+OligoClaude only imports the pysam-free path
+`openspliceai.train_base.openspliceai.SpliceAI`, so `--no-deps` is enough.
 
 For unit tests: `pip install -e .[dev]`
 
-OligoClaude reuses the reference genome and GTF from the [AlphaGenome_ASO](https://github.com/nistring/AlphaGenome_ASO) project. Place a GRCh38 primary assembly FASTA at the path referenced in your config (typically `data/GRCh38.primary_assembly.genome.fa`).
+### One-time setup
+
+```bash
+oligoclaude set-api-key YOUR_ALPHAGENOME_KEY   # saved to ~/.oligoclaude/credentials.json (0600)
+oligoclaude fetch-genome                        # downloads GRCh38 FASTA to ~/.oligoclaude/genomes/ (~3 GB)
+oligoclaude fetch-spliceai-weights              # downloads MANE-10000nt ensemble (~40 MB × 5)
+```
+
+All three commands are idempotent. The genome and SpliceAI weights are
+cached under `~/.oligoclaude/` and reused across configs. The genome fetcher
+streams the gzipped download directly through gunzip so you never store both
+the `.gz` and the uncompressed `.fa` simultaneously.
+
+You can also set the API key via the `ALPHAGENOME_API_KEY` environment
+variable instead of the credentials file.
 
 ## Config
 
@@ -28,10 +61,8 @@ Create a JSON config (see `config/SETD5_e1.json` for a full example):
   "gene_symbol": "SETD5",
   "assembly": "hg38",
   "gtf_url": "https://storage.googleapis.com/alphagenome/reference/gencode/hg38/gencode.v46.annotation.gtf.gz.feather",
-  "fasta_path": "data/GRCh38.primary_assembly.genome.fa",
   "results_dir": "results",
   "data_dir": "data",
-  "dna_api_key": "YOUR_ALPHAGENOME_API_KEY",
   "track_filter": "polyA plus RNA-seq",
   "ontology_terms": ["CL:0000127", "CL:0002319"],
   "requested_outputs": ["RNA_SEQ", "SPLICE_SITE_USAGE"],
@@ -46,7 +77,17 @@ Create a JSON config (see `config/SETD5_e1.json` for a full example):
 }
 ```
 
-Required fields: `gene_symbol`, `assembly`, `gtf_url`, `fasta_path`, `dna_api_key`, `exon_intervals`, `strand`, `ASO_length`, `flank`, `ontology_terms`, `requested_outputs`.
+Required fields: `gene_symbol`, `assembly`, `gtf_url`, `exon_intervals`, `strand`, `ASO_length`, `flank`, `ontology_terms`, `requested_outputs`.
+
+**Do NOT put `dna_api_key` in the config file.** Use `oligoclaude set-api-key`
+or the `ALPHAGENOME_API_KEY` environment variable. A legacy `dna_api_key`
+field is still honored for backward compatibility, but triggers a
+`DeprecationWarning` because it gets committed to version control.
+
+**`fasta_path` is optional.** If omitted, OligoClaude uses the auto-downloaded
+GRCh38 FASTA at `~/.oligoclaude/genomes/GRCh38.primary_assembly.genome.fa`
+(run `oligoclaude fetch-genome` once, or let the first `run` invocation
+fetch it automatically).
 
 Optional fields:
 - `experimental_data`: path to a CSV with columns `ASO_ID`, `ASO sequence`, `Measured (RT-PCR)`, optionally `Region (Exon)`. If present, OligoClaude scores those ASOs directly and produces a correlation plot; otherwise it runs a sliding window across `[exon_start - flank[0], exon_end + flank[1]]`.
@@ -98,17 +139,25 @@ claude mcp add oligoclaude -- oligoclaude-mcp
 
 ### Register in Claude Desktop
 
-Edit `~/.config/Claude/claude_desktop_config.json` (Linux) or the OS-equivalent location:
+Edit `~/.config/Claude/claude_desktop_config.json` (Linux),
+`~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), or
+`%APPDATA%\Claude\claude_desktop_config.json` (Windows):
 
 ```json
 {
   "mcpServers": {
     "oligoclaude": {
-      "command": "oligoclaude-mcp"
+      "command": "oligoclaude-mcp",
+      "env": {
+        "ALPHAGENOME_API_KEY": "your-alphagenome-key-here"
+      }
     }
   }
 }
 ```
+
+Alternatively, omit the `env` block and run `oligoclaude set-api-key` once —
+the server reads `~/.oligoclaude/credentials.json` on startup.
 
 Restart Claude Desktop. Then in any conversation you can say:
 

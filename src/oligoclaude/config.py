@@ -13,17 +13,17 @@ class OligoConfig:
     exon_intervals: tuple[int, int]
     strand: str
     assembly: str
-    fasta_path: Path
     gtf_url: str
     results_dir: Path
     data_dir: Path
-    dna_api_key: str
     ontology_terms: list[str]
     track_filter: str
     requested_outputs: list[str]
     ASO_length: int
     flank: tuple[int, int]
 
+    fasta_path: Optional[Path] = None
+    dna_api_key: Optional[str] = None
     aso_step: int = 1
     experimental_data: Optional[Path] = None
     target_mode: str = "exclude"
@@ -64,11 +64,11 @@ def load_config(path: Path) -> OligoConfig:
         exon_intervals=(int(exon[0]), int(exon[1])),
         strand=raw.get("strand", "+"),
         assembly=raw.get("assembly", "hg38"),
-        fasta_path=_resolve(raw["fasta_path"]),
+        fasta_path=_resolve(raw.get("fasta_path")),
         gtf_url=raw["gtf_url"],
         results_dir=_resolve(raw.get("results_dir", "results")),
         data_dir=_resolve(raw.get("data_dir", "data")),
-        dna_api_key=raw.get("dna_api_key", ""),
+        dna_api_key=raw.get("dna_api_key") or None,
         ontology_terms=list(raw.get("ontology_terms", [])),
         track_filter=raw.get("track_filter", ""),
         requested_outputs=list(raw.get("requested_outputs", ["RNA_SEQ", "SPLICE_SITE_USAGE"])),

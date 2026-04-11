@@ -131,13 +131,10 @@ def setup_alphagenome(cfg: OligoConfig) -> AGContext:
     from alphagenome.data import gene_annotation, genome
     from alphagenome.models import dna_client
 
-    if not cfg.dna_api_key or cfg.dna_api_key == "REPLACE_WITH_YOUR_KEY":
-        raise ValueError(
-            "dna_api_key is missing or placeholder in config. Set a valid "
-            "AlphaGenome API key or use --skip-alphagenome."
-        )
+    from .credentials import require_alphagenome_api_key
 
-    model = dna_client.create(cfg.dna_api_key)
+    api_key = require_alphagenome_api_key(cfg.dna_api_key)
+    model = dna_client.create(api_key)
     gtf = pd.read_feather(cfg.gtf_url)
     gene_interval = gene_annotation.get_gene_interval(gtf, gene_symbol=cfg.gene_symbol)
     optimal_resize = get_optimal_resize_width(gene_interval.width, cfg.resize_width)
@@ -219,8 +216,9 @@ def score_asos_alphagenome(
     """
     variants: list[str] = []
     for cand in candidates:
-        abs_pos_rel = ctx.start_rel + cand.position
-        variants.append(_build_variant_sequence(ctx.ref_seq, abs_pos_rel, cand.length))
+        variants.append(
+            _build_variant_sequence(ctx.ref_seq, cand.position, cand.length)
+        )
 
     n = len(variants)
     print(f"AlphaGenome: predicting {n} masked variants...")

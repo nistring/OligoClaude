@@ -7,18 +7,31 @@ Register via:
 Or add to Claude Desktop ~/.config/Claude/claude_desktop_config.json:
     {
       "mcpServers": {
-        "oligoclaude": { "command": "oligoclaude-mcp" }
+        "oligoclaude": {
+          "command": "oligoclaude-mcp",
+          "env": { "ALPHAGENOME_API_KEY": "your-key-here" }
+        }
       }
     }
 
 Then ask in any Claude session:
     "Predict ASO efficacy for /path/to/SETD5_e1.json"
+
+Credential resolution order on startup:
+    1. $ALPHAGENOME_API_KEY environment variable
+    2. ~/.oligoclaude/credentials.json (saved via `oligoclaude set-api-key`)
+    3. Legacy `dna_api_key` field inside the individual config JSON (discouraged)
+
+The server warns on startup if no key is configured; callers that pass
+`skip_alphagenome=true` can still use the SpliceAI-only path without a key.
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Optional
 
+from .credentials import ENV_VAR, get_alphagenome_api_key
 from .workflow import WorkflowResult, run_workflow
 
 
@@ -104,7 +117,23 @@ def _stats_to_json(stats: Optional[dict]) -> Optional[dict]:
     return out
 
 
+def _check_startup_credentials() -> None:
+    """Print a one-line advisory to stderr if no AlphaGenome key is configured.
+
+    Does not abort — callers may still invoke `predict_aso_efficacy` with
+    `skip_alphagenome=true` for SpliceAI-only runs.
+    """
+    if get_alphagenome_api_key() is None:
+        sys.stderr.write(
+            "[oligoclaude-mcp] WARNING: no AlphaGenome API key found.\n"
+            f"  Set ${ENV_VAR} in the MCP server `env` block, or run "
+            "`oligoclaude set-api-key <KEY>` once.\n"
+            "  SpliceAI-only calls (skip_alphagenome=true) will still work.\n"
+        )
+
+
 def main() -> None:
+    _check_startup_credentials()
     mcp = _build_mcp()
     mcp.run(transport="stdio")
 

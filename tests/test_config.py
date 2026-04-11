@@ -12,10 +12,8 @@ def _write_cfg(tmp_path: Path, **overrides) -> Path:
         "gene_symbol": "SETD5",
         "assembly": "hg38",
         "gtf_url": "https://example.com/gtf.feather",
-        "fasta_path": "data/genome.fa",
         "results_dir": "results",
         "data_dir": "data",
-        "dna_api_key": "test_key",
         "track_filter": "polyA plus RNA-seq",
         "ontology_terms": ["CL:0000127"],
         "requested_outputs": ["RNA_SEQ"],
@@ -49,6 +47,8 @@ def test_load_defaults(tmp_path: Path):
     assert cfg.experimental_data is None
     assert cfg.spliceai_batch == 12
     assert cfg.spliceai_threads is None
+    assert cfg.fasta_path is None
+    assert cfg.dna_api_key is None
 
 
 def test_path_resolution_relative(tmp_path: Path):

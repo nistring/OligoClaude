@@ -1,7 +1,7 @@
 """End-to-end OligoClaude workflow — shared by CLI and MCP server."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +16,7 @@ from .aso_enum import (
 from .bed_export import export_all
 from .config import OligoConfig, load_config
 from .experimental import aggregate_experimental_candidates, load_experimental
+from .genome_fetch import resolve_fasta_path
 from .plot import correlation_plot, print_correlation_table
 from .sequence_utils import load_reference_sequence
 
@@ -58,65 +59,79 @@ def run_workflow(
     cfg.results_dir = Path(cfg.results_dir) / "ASO"
     cfg.results_dir.mkdir(parents=True, exist_ok=True)
 
+    cfg.fasta_path = resolve_fasta_path(
+        cfg.fasta_path, auto_fetch=True, verbose=verbose
+    )
+
     if verbose:
         print(f"Config: {config_path}")
         print(
             f"Gene: {cfg.gene_symbol} | Exon: {cfg.exon_intervals} | "
             f"Strand: {cfg.strand} | ASO length: {cfg.ASO_length}"
         )
+        print(f"FASTA: {cfg.fasta_path}")
 
     all_scores: dict[str, np.ndarray] = {}
     ag_ctx = None
     chrom: Optional[str] = None
-    variant_interval_start_genomic: Optional[int] = None
+    ref_anchor_genomic: Optional[int] = None
     candidates: list[AsoCandidate] = []
     ref_seq: Optional[str] = None
+    scan_start_rel: int = 0
+    scan_end_rel: int = 0
+    exp_df: Optional[pd.DataFrame] = None
 
     if not skip_alphagenome:
-        from .alphagenome_predict import score_asos_alphagenome, setup_alphagenome
+        from .alphagenome_predict import setup_alphagenome
 
         ag_ctx = setup_alphagenome(cfg)
         chrom = ag_ctx.interval.chromosome
-        variant_interval_start_genomic = ag_ctx.variant_interval.start
         ref_seq = ag_ctx.ref_seq
-        start_rel_in_ref = ag_ctx.start_rel
-        end_rel_in_ref = ag_ctx.end_rel
+        ref_anchor_genomic = ag_ctx.interval.start
+        scan_start_rel = ag_ctx.start_rel
+        scan_end_rel = ag_ctx.end_rel
     else:
-        # Without AlphaGenome context we still need genomic coordinates + ref seq.
-        # Load just the scan region from FASTA.
         exon_start, exon_end = cfg.exon_intervals
-        variant_interval_start_genomic = exon_start - cfg.flank[0]
-        variant_interval_end_genomic = exon_end + cfg.flank[1]
-        chrom_guess = _infer_chrom_from_gtf(cfg)
-        chrom = chrom_guess
+        scan_genomic_start = exon_start - cfg.flank[0]
+        scan_genomic_end = exon_end + cfg.flank[1]
+        chrom = _infer_chrom_from_gtf(cfg)
         ref_seq = load_reference_sequence(
-            cfg.fasta_path,
-            chrom,
-            variant_interval_start_genomic,
-            variant_interval_end_genomic,
+            cfg.fasta_path, chrom, scan_genomic_start, scan_genomic_end
         )
-        start_rel_in_ref = 0
-        end_rel_in_ref = variant_interval_end_genomic - variant_interval_start_genomic
+        ref_anchor_genomic = scan_genomic_start
+        scan_start_rel = 0
+        scan_end_rel = len(ref_seq)
 
     if cfg.experimental_data:
         exp_df = load_experimental(cfg.experimental_data)
+        n_exp_rows = len(exp_df)
         candidates = enumerate_from_experimental(
             exp_df,
             ref_seq=ref_seq,
-            variant_interval_start_rel=start_rel_in_ref,
-            variant_interval_end_rel=end_rel_in_ref,
+            variant_interval_start_rel=0,
+            variant_interval_end_rel=len(ref_seq),
         )
+        matched_ids = {_strip_match_suffix(c.aso_id) for c in candidates}
+        n_matched = len(matched_ids)
         if verbose:
             print(
-                f"Enumerated {len(candidates)} candidates from experimental data "
-                f"({len(exp_df)} rows)"
+                f"Enumerated {len(candidates)} candidate(s) from "
+                f"{n_matched}/{n_exp_rows} experimental row(s) "
+                f"(searched entire ref_seq, {len(ref_seq):,} bp)"
+            )
+        if n_matched < n_exp_rows:
+            dropped = n_exp_rows - n_matched
+            print(
+                f"WARNING: {dropped} experimental ASO(s) did not match the "
+                "loaded reference sequence. On `--skip-alphagenome` the scan "
+                "region is just exon±flank; run with AlphaGenome to load the "
+                "full gene interval."
             )
     else:
-        exp_df = None
         candidates = enumerate_sliding(
             ref_seq=ref_seq,
-            start_rel=start_rel_in_ref,
-            end_rel=end_rel_in_ref,
+            start_rel=scan_start_rel,
+            end_rel=scan_end_rel,
             aso_length=cfg.ASO_length,
             step=cfg.aso_step,
         )
@@ -146,7 +161,7 @@ def run_workflow(
             cfg,
             candidates,
             chrom=chrom,
-            variant_interval_start_genomic=variant_interval_start_genomic,
+            variant_interval_start_genomic=ref_anchor_genomic,
             models=sai_models,
         )
         all_scores["SpliceAI"] = sai_scores
@@ -175,7 +190,7 @@ def run_workflow(
     bed_files = export_all(
         cfg=cfg,
         chrom=chrom,
-        variant_interval_start=variant_interval_start_genomic,
+        variant_interval_start=ref_anchor_genomic,
         candidates=candidates,
         all_scores=all_scores,
         samples_max=samples_max,
@@ -184,7 +199,6 @@ def run_workflow(
     correlation_png: Optional[Path] = None
     stats: Optional[dict] = None
     if cfg.experimental_data and len(all_scores) > 0:
-        # Experimental mode: aggregate candidate scores per experimental row.
         matched = aggregate_experimental_candidates(
             candidates=candidates, scores=all_scores
         )
@@ -194,7 +208,9 @@ def run_workflow(
             )
             matched.to_csv(matched_csv, index=False)
             if verbose:
-                print(f"Wrote {matched_csv}")
+                print(
+                    f"Wrote {matched_csv} ({len(matched)} experimental rows)"
+                )
 
             score_cols = list(all_scores.keys())
             correlation_png = cfg.results_dir / f"{cfg.config_name}_correlation.png"
@@ -203,6 +219,7 @@ def run_workflow(
                 score_columns=score_cols,
                 measured_col="Measured (RT-PCR)",
                 out_png=correlation_png,
+                include_combined=True,
             )
             print_correlation_table(stats)
 
@@ -216,6 +233,11 @@ def run_workflow(
         ucsc_instructions=ucsc,
         n_candidates=len(candidates),
     )
+
+
+def _strip_match_suffix(aso_id: str) -> str:
+    import re
+    return re.sub(r"_m\d+$", "", aso_id)
 
 
 def _infer_chrom_from_gtf(cfg: OligoConfig) -> str:

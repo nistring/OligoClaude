@@ -32,23 +32,31 @@ def correlation_plot(
     measured_col: str,
     out_png: Path,
     exon_col: Optional[str] = "Region (Exon)",
+    include_combined: bool = True,
 ) -> dict:
     """Render side-by-side regression plots per exon, one overlay per score column.
 
-    Each score column is min-max normalized per exon to [0, 1] before plotting
+    Each score column is min-max normalized per panel to [0, 1] before plotting
     so they can share a common x-axis. Correlations are computed on the raw
     (un-normalized) values.
+
+    When `include_combined=True` and multiple exons are present, an extra "all"
+    panel is added that pools samples across exons (useful for a single
+    "pipeline-wide" correlation figure).
 
     Returns nested stats: {exon: {source: (pearson_r, pearson_p, spearman, p)}}
     """
     import matplotlib.pyplot as plt
     import seaborn as sns
 
+    panels: list[tuple[str, pd.DataFrame]] = []
     if exon_col and exon_col in matched_df.columns:
         exons = sorted(matched_df[exon_col].dropna().unique().tolist())
-        panels: list[tuple[str, pd.DataFrame]] = [
+        panels = [
             (str(e), matched_df[matched_df[exon_col] == e].copy()) for e in exons
         ]
+        if include_combined and len(exons) > 1:
+            panels.append(("all", matched_df.copy()))
     else:
         panels = [("all", matched_df.copy())]
 

@@ -2,11 +2,10 @@
   "gene_symbol": "SETD5",
   "assembly": "hg38",
   "gtf_url": "https://storage.googleapis.com/alphagenome/reference/gencode/hg38/gencode.v46.annotation.gtf.gz.feather",
-  "fasta_path": "data/GRCh38.primary_assembly.genome.fa",
+  "_fasta_comment": "Optional. Omit to use the ~/.oligoclaude/genomes/ cache (auto-downloaded).",
   "results_dir": "results",
   "data_dir": "data",
-  "dna_api_key": "REPLACE_WITH_YOUR_KEY",
-  "_comment": "REPLACE_WITH_YOUR_KEY",
+  "_api_key_comment": "Set $ALPHAGENOME_API_KEY env var or run `oligoclaude set-api-key` — do NOT put keys in configs that get committed.",
   "track_filter": "polyA plus RNA-seq",
   "ontology_terms": ["CL:0000127","CL:0002319","CL:0011020","CL:0000047","CL:0000679"],
   "requested_outputs": [

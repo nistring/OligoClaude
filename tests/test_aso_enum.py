@@ -23,12 +23,12 @@ def test_sliding_count_step_2():
     assert len(cands) == 8
 
 
-def test_sliding_positions_are_scan_relative():
+def test_sliding_positions_are_ref_seq_offsets():
     seq = "ACGT" * 25  # 100 bp
     cands = enumerate_sliding(seq, start_rel=4, end_rel=16, aso_length=4, step=1)
-    assert cands[0].position == 0
+    assert cands[0].position == 4
     assert cands[0].genomic_target_seq == seq[4:8]
-    assert cands[-1].position == 8
+    assert cands[-1].position == 12
     assert cands[-1].genomic_target_seq == seq[12:16]
 
 
@@ -89,4 +89,6 @@ def test_experimental_restricted_to_scan_region():
     )
     assert len(cands2) == 2
     assert cands2[0].aso_id == "a1"
+    assert cands2[0].position == 0
     assert cands2[1].aso_id == "a1_m2"
+    assert cands2[1].position == 12  # "GCTTACAG" + "CCCC" = 12
