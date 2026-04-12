@@ -84,6 +84,7 @@ def _build_mcp():
             skip_alphagenome=skip_alphagenome,
             skip_spliceai=skip_spliceai,
             samples_max=samples_max,
+            open_browser=False,
         )
         return {
             "scores_csv": str(result.scores_csv) if result.scores_csv else None,
@@ -93,6 +94,7 @@ def _build_mcp():
             ),
             "stats": _stats_to_json(result.stats),
             "ucsc_instructions": result.ucsc_instructions,
+            "ucsc_url": result.ucsc_url,
             "n_candidates": result.n_candidates,
         }
 

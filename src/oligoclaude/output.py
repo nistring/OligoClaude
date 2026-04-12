@@ -4,10 +4,13 @@ Both writers consume the same `candidates` + `scores` payload produced by
 `predict.py`. BED export produces a compact (top/bottom 20) file and a full
 file per score source; the correlation plot overlays one regression line
 per score source per exon panel, plus an "all-exons" panel when multiple
-exons are present.
+exons are present. `open_ucsc_browser` auto-uploads compact BED tracks to
+the UCSC Genome Browser via `hgct_customText` URL parameter.
 """
 from __future__ import annotations
 
+import urllib.parse
+import webbrowser
 from pathlib import Path
 from typing import Optional
 
@@ -154,6 +157,96 @@ def export_all(
         )
         written.extend([compact, full])
     return written
+
+
+def write_experimental_bed(
+    results_dir: Path,
+    config_name: str,
+    chrom: str,
+    strand: str,
+    candidates: list[AsoCandidate],
+    variant_interval_start: int,
+) -> Optional[Path]:
+    """Write a BED track from experimental measured (RT-PCR) values.
+
+    Creates a green-gradient track where darker green = higher measured
+    value. Returns None if no candidates have measured data.
+    """
+    exp = [(c, c.measured) for c in candidates if c.measured is not None]
+    if not exp:
+        return None
+
+    results_dir = Path(results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    bed_strand = "+" if strand == "-" else "-"
+
+    vals = np.array([m for _, m in exp], dtype=np.float32)
+    lo, hi = vals.min(), vals.max()
+    norm = (vals - lo) / (hi - lo + 1e-12)
+    intensities = np.clip((1 - norm) * 200 + 55, 55, 255).astype(int)
+
+    rows = []
+    for i, ((c, m), intensity) in enumerate(zip(exp, intensities)):
+        s = variant_interval_start + c.position
+        e = s + c.length
+        rows.append({
+            "chrom": chrom,
+            "chromStart": s,
+            "chromEnd": e,
+            "name": f"{c.aso_id}({m:.1f})",
+            "score": int(np.clip(m * 100, 0, 1000)),
+            "strand": bed_strand,
+            "thickStart": s,
+            "thickEnd": e,
+            "itemRgb": f"0,{int(intensity)},0",
+        })
+
+    path = results_dir / f"{config_name}_ASO_Measured.bed"
+    _write_track(
+        path,
+        f'track name={config_name}_ASO_Measured '
+        f'description="Measured RT-PCR" visibility="pack" useScore=1 '
+        f'itemRgb="On"',
+        pd.DataFrame(rows),
+    )
+    return path
+
+
+def open_ucsc_browser(
+    assembly: str,
+    chrom: str,
+    exon_start: int,
+    exon_end: int,
+    flank: tuple[int, int],
+    bed_files: list[Path],
+) -> Optional[str]:
+    """Auto-open the UCSC Genome Browser with compact BED tracks loaded.
+
+    Reads the compact (non-full) BED files, URL-encodes their content into
+    the `hgct_customText` parameter, and opens the browser at the target
+    exon ± flank. Returns the URL, or None if there are no tracks.
+    """
+    compact_files = [f for f in bed_files if not f.name.endswith("_full.bed")]
+    if not compact_files:
+        return None
+
+    bed_content = "\n".join(f.read_text().rstrip() for f in compact_files if f.exists())
+    if not bed_content.strip():
+        return None
+
+    position = f"{chrom}:{exon_start - flank[0]}-{exon_end + flank[1]}"
+    params = urllib.parse.urlencode({
+        "db": assembly,
+        "position": position,
+        "hgct_customText": bed_content,
+    })
+    url = f"https://genome.ucsc.edu/cgi-bin/hgTracks?{params}"
+
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
+    return url
 
 
 # ---------- Correlation plot ----------

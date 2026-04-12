@@ -18,7 +18,13 @@ from .core import (
     load_experimental,
     load_reference_sequence,
 )
-from .output import correlation_plot, export_all, print_correlation_table
+from .output import (
+    correlation_plot,
+    export_all,
+    open_ucsc_browser,
+    print_correlation_table,
+    write_experimental_bed,
+)
 from .resources import resolve_fasta_path
 
 
@@ -29,6 +35,7 @@ class WorkflowResult:
     correlation_plot: Optional[Path]
     stats: Optional[dict]
     ucsc_instructions: str
+    ucsc_url: Optional[str] = None
     n_candidates: int = 0
 
 
@@ -54,6 +61,7 @@ def run_workflow(
     skip_spliceai: bool = False,
     samples_max: int = 20,
     verbose: bool = False,
+    open_browser: bool = True,
 ) -> WorkflowResult:
     """Run the full OligoClaude pipeline and return paths + stats."""
     cfg = load_config(Path(config_path))
@@ -224,6 +232,31 @@ def run_workflow(
             )
             print_correlation_table(stats)
 
+    exp_bed = write_experimental_bed(
+        results_dir=cfg.results_dir,
+        config_name=cfg.config_name,
+        chrom=chrom,
+        strand=cfg.strand,
+        candidates=candidates,
+        variant_interval_start=ref_anchor_genomic,
+    )
+    if exp_bed:
+        bed_files.append(exp_bed)
+
+    ucsc_url: Optional[str] = None
+    if open_browser:
+        exon_start, exon_end = cfg.exon_intervals
+        ucsc_url = open_ucsc_browser(
+            assembly=cfg.assembly,
+            chrom=chrom,
+            exon_start=exon_start,
+            exon_end=exon_end,
+            flank=cfg.flank,
+            bed_files=bed_files,
+        )
+        if verbose and ucsc_url:
+            print(f"Opened UCSC Genome Browser (URL length: {len(ucsc_url):,} chars)")
+
     ucsc = _build_ucsc_instructions(cfg.assembly, bed_files)
 
     return WorkflowResult(
@@ -232,6 +265,7 @@ def run_workflow(
         correlation_plot=correlation_png,
         stats=stats,
         ucsc_instructions=ucsc,
+        ucsc_url=ucsc_url,
         n_candidates=len(candidates),
     )
 
