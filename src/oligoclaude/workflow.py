@@ -8,17 +8,18 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from .aso_enum import (
+from .config import OligoConfig, load_config
+from .core import (
     AsoCandidate,
+    _strip_match_suffix,
+    aggregate_experimental_candidates,
     enumerate_from_experimental,
     enumerate_sliding,
+    load_experimental,
+    load_reference_sequence,
 )
-from .bed_export import export_all
-from .config import OligoConfig, load_config
-from .experimental import aggregate_experimental_candidates, load_experimental
-from .genome_fetch import resolve_fasta_path
-from .plot import correlation_plot, print_correlation_table
-from .sequence_utils import load_reference_sequence
+from .output import correlation_plot, export_all, print_correlation_table
+from .resources import resolve_fasta_path
 
 
 @dataclass
@@ -82,7 +83,7 @@ def run_workflow(
     exp_df: Optional[pd.DataFrame] = None
 
     if not skip_alphagenome:
-        from .alphagenome_predict import setup_alphagenome
+        from .predict import setup_alphagenome
 
         ag_ctx = setup_alphagenome(cfg)
         chrom = ag_ctx.interval.chromosome
@@ -147,14 +148,14 @@ def run_workflow(
         )
 
     if not skip_alphagenome and ag_ctx is not None:
-        from .alphagenome_predict import score_asos_alphagenome
+        from .predict import score_asos_alphagenome
 
         ag_results = score_asos_alphagenome(ag_ctx, cfg, candidates)
         for name, arr in ag_results.items():
             all_scores[f"AlphaGenome_{name}"] = arr
 
     if not skip_spliceai:
-        from .spliceai_predict import score_asos_spliceai, setup_spliceai
+        from .predict import score_asos_spliceai, setup_spliceai
 
         sai_models, _ = setup_spliceai(cfg.spliceai_threads)
         sai_scores = score_asos_spliceai(
@@ -233,11 +234,6 @@ def run_workflow(
         ucsc_instructions=ucsc,
         n_candidates=len(candidates),
     )
-
-
-def _strip_match_suffix(aso_id: str) -> str:
-    import re
-    return re.sub(r"_m\d+$", "", aso_id)
 
 
 def _infer_chrom_from_gtf(cfg: OligoConfig) -> str:

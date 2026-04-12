@@ -31,7 +31,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from .credentials import ENV_VAR, get_alphagenome_api_key
+from .resources import ENV_VAR, get_alphagenome_api_key
 from .workflow import WorkflowResult, run_workflow
 
 

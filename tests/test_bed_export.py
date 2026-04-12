@@ -3,8 +3,8 @@ from pathlib import Path
 
 import numpy as np
 
-from oligoclaude.aso_enum import AsoCandidate
-from oligoclaude.bed_export import write_bed
+from oligoclaude.core import AsoCandidate
+from oligoclaude.output import write_bed
 
 
 def _mk_candidates(n: int, length: int = 18) -> list:

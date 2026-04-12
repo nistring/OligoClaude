@@ -1,11 +1,11 @@
 """Tests for aso_enum."""
 import pandas as pd
 
-from oligoclaude.aso_enum import (
+from oligoclaude.core import (
     enumerate_from_experimental,
     enumerate_sliding,
+    reverse_complement,
 )
-from oligoclaude.sequence_utils import reverse_complement
 
 
 def test_sliding_count_step_1():
