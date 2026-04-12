@@ -1,6 +1,6 @@
 # OligoClaude
 
-Predict antisense oligonucleotide (ASO) efficacy using **AlphaGenome** and **SpliceAI**, compare to experimental RT-PCR data, and export UCSC-ready BED tracks — all from a single JSON config.
+Predict antisense oligonucleotide (ASO) efficacy using **AlphaGenome** and **SpliceAI**, compare to experimental RT-PCR data, and visualize results on the **UCSC Genome Browser** — all from a single JSON config.
 
 Exposed three ways:
 1. CLI (`oligoclaude run --config …`)
@@ -41,7 +41,7 @@ For unit tests: `pip install -e .[dev]`
 ```bash
 oligoclaude set-api-key YOUR_ALPHAGENOME_KEY   # saved to ~/.oligoclaude/credentials.json (0600)
 oligoclaude fetch-genome                        # downloads GRCh38 FASTA to ~/.oligoclaude/genomes/ (~3 GB)
-oligoclaude fetch-spliceai-weights              # downloads MANE-10000nt ensemble (~40 MB × 5)
+oligoclaude fetch-spliceai-weights              # downloads MANE-10000nt ensemble (~3 MB x 5)
 ```
 
 All three commands are idempotent. The genome and SpliceAI weights are
@@ -100,7 +100,7 @@ Relative paths inside the JSON are resolved against the config file's directory.
 ## CLI usage
 
 ```bash
-# Full workflow (AlphaGenome + SpliceAI + correlation plot)
+# Full workflow (AlphaGenome + SpliceAI + correlation plot + UCSC browser)
 oligoclaude run --config config/SETD5_e1.json -v
 
 # Skip SpliceAI (faster; AlphaGenome only)
@@ -108,23 +108,34 @@ oligoclaude run --config config/SETD5_e1.json --skip-spliceai
 
 # Skip AlphaGenome (no API key needed)
 oligoclaude run --config config/SETD5_e1.json --skip-alphagenome
+
+# Suppress auto-opening the UCSC Genome Browser
+oligoclaude run --config config/SETD5_e1.json --no-browser
 ```
 
 Outputs land in `<results_dir>/ASO/`:
 - `<config_name>_ASO_scores.csv` — raw scores per ASO, all sources
-- `<config_name>_ASO_<source>.bed`, `<config_name>_ASO_<source>_full.bed` — UCSC custom track files
-- `<config_name>_correlation.png` — if experimental data provided
+- `<config_name>_ASO_<source>.bed` / `_full.bed` — UCSC custom track files (predicted)
+- `<config_name>_ASO_Measured.bed` — experimental RT-PCR track (if experimental data provided)
+- `<config_name>_correlation.png` — per-exon + combined correlation plot (if experimental data)
 - `<config_name>_experimental_matched.csv` — aggregated predictions vs measured
 
-## UCSC custom track upload
+## UCSC Genome Browser
 
-OligoClaude writes BED files matching the format used by `genome.ucsc.edu`'s custom tracks. To view them:
+By default, `oligoclaude run` **automatically opens the UCSC Genome Browser**
+in your default browser with all compact BED tracks (predicted + experimental)
+pre-loaded. The view is centered on the target exon with the configured flank.
+
+The predicted tracks use a **red/blue gradient** (red = exon weakening,
+blue = exon strengthening) and the experimental track uses a **green gradient**
+(darker green = higher measured RT-PCR inclusion).
+
+If you prefer to upload manually, pass `--no-browser` and use the printed
+file paths:
 
 1. Go to `https://genome.ucsc.edu/cgi-bin/hgCustom?db=hg38`
 2. Click **Choose File** and pick one of the generated `*.bed` files
 3. Click **Submit**
-
-The tool prints these instructions (with the exact file paths) at the end of every run.
 
 ## Use from Claude (MCP connector)
 
@@ -163,7 +174,7 @@ Restart Claude Desktop. Then in any conversation you can say:
 
 > *"Use the oligoclaude MCP to predict ASO efficacy for /home/me/OligoClaude/config/SETD5_e1.json"*
 
-Claude will invoke `predict_aso_efficacy(config_path=...)` and receive a dict with the scores CSV path, BED file paths, correlation plot path, per-exon Pearson/Spearman stats, and UCSC upload instructions.
+Claude will invoke `predict_aso_efficacy(config_path=...)` and receive a dict with the scores CSV path, BED file paths, UCSC browser URL, correlation plot path, and per-exon Pearson/Spearman stats.
 
 ### Tool signature
 
@@ -175,6 +186,8 @@ predict_aso_efficacy(
     samples_max: int = 20,
 ) -> dict
 ```
+
+Returns: `scores_csv`, `bed_files`, `correlation_plot`, `stats`, `ucsc_instructions`, `ucsc_url`, `n_candidates`.
 
 ## How scoring works
 
@@ -188,14 +201,33 @@ score = alt[exon].mean() / ref[gene_body].mean() * alt[gene_body].mean() - ref[e
 
 Both scores are positive when the ASO weakens exon usage (exon skipping) and negative when it strengthens it.
 
+## Package structure
+
+```
+src/oligoclaude/
+  config.py       JSON config loading + OligoConfig dataclass
+  core.py         Sequence utils, ASO enumeration, experimental-data helpers
+  predict.py      AlphaGenome + SpliceAI scoring (diff_mean formula)
+  output.py       BED export, UCSC browser auto-open, correlation plots
+  resources.py    API credentials, GRCh38 FASTA cache, SpliceAI weight cache
+  workflow.py     End-to-end pipeline orchestration
+  cli.py          CLI entry point (oligoclaude)
+  mcp_server.py   MCP server entry point (oligoclaude-mcp)
+```
+
 ## Library usage
 
 ```python
 from oligoclaude import run_workflow
 
-result = run_workflow("config/SETD5_e1.json", verbose=True)
+result = run_workflow(
+    "config/SETD5_e1.json",
+    verbose=True,
+    open_browser=False,    # suppress UCSC auto-open
+)
 print(result.scores_csv)
 print(result.stats)
+print(result.ucsc_url)     # URL to open manually if needed
 ```
 
 ## License
