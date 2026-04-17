@@ -40,14 +40,21 @@ For unit tests: `pip install -e .[dev]`
 
 ```bash
 oligoclaude set-api-key YOUR_ALPHAGENOME_KEY   # saved to ~/.oligoclaude/credentials.json (0600)
-oligoclaude fetch-genome                        # downloads GRCh38 FASTA to ~/.oligoclaude/genomes/ (~3 GB)
 oligoclaude fetch-spliceai-weights              # downloads MANE-10000nt ensemble (~3 MB x 5)
 ```
 
-All three commands are idempotent. The genome and SpliceAI weights are
-cached under `~/.oligoclaude/` and reused across configs. The genome fetcher
-streams the gzipped download directly through gunzip so you never store both
-the `.gz` and the uncompressed `.fa` simultaneously.
+**No genome download required.** OligoClaude fetches only the needed genomic
+region on-the-fly from the UCSC REST API (typically <1 second for 500 kb vs
+downloading the full ~3 GB genome). If you prefer offline use or run many
+analyses, you can optionally cache the full genome locally:
+
+```bash
+oligoclaude fetch-genome                        # optional: downloads GRCh38 FASTA (~3 GB)
+```
+
+When a local FASTA is available (via `fetch-genome` or a `fasta_path` in the
+config), OligoClaude uses it automatically via pyfaidx. Otherwise it
+transparently falls back to the UCSC API.
 
 You can also set the API key via the `ALPHAGENOME_API_KEY` environment
 variable instead of the credentials file.
@@ -84,10 +91,9 @@ or the `ALPHAGENOME_API_KEY` environment variable. A legacy `dna_api_key`
 field is still honored for backward compatibility, but triggers a
 `DeprecationWarning` because it gets committed to version control.
 
-**`fasta_path` is optional.** If omitted, OligoClaude uses the auto-downloaded
-GRCh38 FASTA at `~/.oligoclaude/genomes/GRCh38.primary_assembly.genome.fa`
-(run `oligoclaude fetch-genome` once, or let the first `run` invocation
-fetch it automatically).
+**`fasta_path` is optional.** If omitted, OligoClaude fetches only the needed
+region from the UCSC REST API on-the-fly. If a local genome is cached
+(`oligoclaude fetch-genome`), it is used automatically via pyfaidx.
 
 Optional fields:
 - `experimental_data`: path to a CSV with columns `ASO_ID`, `ASO sequence`, `Measured (RT-PCR)`, optionally `Region (Exon)`. If present, OligoClaude scores those ASOs directly and produces a correlation plot; otherwise it runs a sliding window across `[exon_start - flank[0], exon_end + flank[1]]`.

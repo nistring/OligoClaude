@@ -132,7 +132,8 @@ def setup_alphagenome(cfg: OligoConfig) -> AGContext:
 
     requested_outputs = _parse_output_types(cfg.requested_outputs)
     ref_seq = load_reference_sequence(
-        cfg.fasta_path, interval.chromosome, interval.start, interval.end
+        cfg.fasta_path, interval.chromosome, interval.start, interval.end,
+        assembly=cfg.assembly,
     )
 
     exon_start, exon_end = int(cfg.exon_intervals[0]), int(cfg.exon_intervals[1])
@@ -296,7 +297,8 @@ def setup_spliceai(
 
 
 def _build_base_tensor(
-    fasta_path: Path, chrom: str, exon_start: int, exon_end: int
+    fasta_path: Optional[Path], chrom: str, exon_start: int, exon_end: int,
+    assembly: str = "hg38",
 ):
     """Center a (SL+CL) window on the exon midpoint and one-hot encode once."""
     import torch
@@ -306,7 +308,7 @@ def _build_base_tensor(
     win_start = sl_start - CL_MAX // 2
     win_end = win_start + INPUT_LEN
 
-    seq = load_reference_sequence(fasta_path, chrom, win_start, win_end)
+    seq = load_reference_sequence(fasta_path, chrom, win_start, win_end, assembly=assembly)
     if len(seq) != INPUT_LEN:
         raise RuntimeError(
             f"Requested {INPUT_LEN} bp from {chrom}:{win_start}-{win_end}, "
@@ -351,7 +353,8 @@ def score_asos_spliceai(
         models, _ = setup_spliceai(cfg.spliceai_threads)
 
     base_tensor, win_start, exon_a, exon_b = _build_base_tensor(
-        cfg.fasta_path, chrom, int(cfg.exon_intervals[0]), int(cfg.exon_intervals[1])
+        cfg.fasta_path, chrom, int(cfg.exon_intervals[0]), int(cfg.exon_intervals[1]),
+        assembly=cfg.assembly,
     )
 
     ref_out = _forward_ensemble(models, base_tensor)

@@ -68,9 +68,7 @@ def run_workflow(
     cfg.results_dir = Path(cfg.results_dir) / "ASO"
     cfg.results_dir.mkdir(parents=True, exist_ok=True)
 
-    cfg.fasta_path = resolve_fasta_path(
-        cfg.fasta_path, auto_fetch=True, verbose=verbose
-    )
+    cfg.fasta_path = resolve_fasta_path(cfg.fasta_path, verbose=verbose)
 
     if verbose:
         print(f"Config: {config_path}")
@@ -78,7 +76,10 @@ def run_workflow(
             f"Gene: {cfg.gene_symbol} | Exon: {cfg.exon_intervals} | "
             f"Strand: {cfg.strand} | ASO length: {cfg.ASO_length}"
         )
-        print(f"FASTA: {cfg.fasta_path}")
+        if cfg.fasta_path:
+            print(f"FASTA: {cfg.fasta_path}")
+        else:
+            print("FASTA: online (UCSC API — no local genome download needed)")
 
     all_scores: dict[str, np.ndarray] = {}
     ag_ctx = None
@@ -105,7 +106,8 @@ def run_workflow(
         scan_genomic_end = exon_end + cfg.flank[1]
         chrom = _infer_chrom_from_gtf(cfg)
         ref_seq = load_reference_sequence(
-            cfg.fasta_path, chrom, scan_genomic_start, scan_genomic_end
+            cfg.fasta_path, chrom, scan_genomic_start, scan_genomic_end,
+            assembly=cfg.assembly,
         )
         ref_anchor_genomic = scan_genomic_start
         scan_start_rel = 0

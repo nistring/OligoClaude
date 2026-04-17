@@ -18,17 +18,32 @@ def reverse_complement(seq: str) -> str:
     return seq.translate(COMP)[::-1]
 
 
-def load_reference_sequence(fasta_path: Path, chrom: str, start: int, end: int) -> str:
-    """Load a genomic subsequence (0-based, end-exclusive) via pyfaidx."""
-    from pyfaidx import Fasta
+def load_reference_sequence(
+    fasta_path: Optional[Path],
+    chrom: str,
+    start: int,
+    end: int,
+    assembly: str = "hg38",
+) -> str:
+    """Load a genomic subsequence (0-based, end-exclusive).
 
-    fa = Fasta(str(fasta_path), as_raw=True, sequence_always_upper=True)
-    if chrom not in fa:
-        raise KeyError(
-            f"Chromosome {chrom!r} not found in {fasta_path}. "
-            f"Available: {list(fa.keys())[:5]}..."
-        )
-    return str(fa[chrom][start:end])
+    Uses local FASTA via pyfaidx when available; otherwise fetches just the
+    needed region from the UCSC REST API (no multi-GB download required).
+    """
+    if fasta_path and Path(fasta_path).exists():
+        from pyfaidx import Fasta
+
+        fa = Fasta(str(fasta_path), as_raw=True, sequence_always_upper=True)
+        if chrom not in fa:
+            raise KeyError(
+                f"Chromosome {chrom!r} not found in {fasta_path}. "
+                f"Available: {list(fa.keys())[:5]}..."
+            )
+        return str(fa[chrom][start:end])
+
+    from .resources import fetch_sequence_ucsc
+
+    return fetch_sequence_ucsc(assembly, chrom, start, end)
 
 
 def one_hot_encode(seq: str) -> np.ndarray:

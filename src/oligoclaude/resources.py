@@ -12,6 +12,7 @@ import json
 import os
 import stat
 import sys
+import urllib.parse
 import urllib.request
 import warnings
 from pathlib import Path
@@ -175,9 +176,14 @@ def ensure_hg38_fasta(
 
 
 def resolve_fasta_path(
-    cfg_value: Optional[Path], *, auto_fetch: bool = True, verbose: bool = True
-) -> Path:
-    """Resolve a FASTA path, falling back to the cache and auto-downloading."""
+    cfg_value: Optional[Path], *, verbose: bool = True
+) -> Optional[Path]:
+    """Resolve a FASTA path, returning None when no local file is available.
+
+    When None is returned, callers should use `fetch_sequence_ucsc()` to
+    retrieve only the needed region on-the-fly instead of downloading
+    the entire ~3 GB genome.
+    """
     if cfg_value and Path(cfg_value).exists():
         return Path(cfg_value)
     cached = default_hg38_path()
@@ -185,12 +191,49 @@ def resolve_fasta_path(
         if verbose and cfg_value:
             print(f"fasta_path {cfg_value} not found — using cached {cached}")
         return cached
-    if auto_fetch:
-        return ensure_hg38_fasta(verbose=verbose)
-    raise FileNotFoundError(
-        f"FASTA not found: {cfg_value}. Run `oligoclaude fetch-genome` "
-        "or download GRCh38.primary_assembly.genome.fa manually."
-    )
+    if verbose:
+        print(
+            "No local FASTA — genomic sequences will be fetched on-the-fly "
+            "from the UCSC API. Run `oligoclaude fetch-genome` to cache "
+            "the full genome locally for offline use."
+        )
+    return None
+
+
+# ---------- UCSC online sequence fetch ----------
+
+def fetch_sequence_ucsc(assembly: str, chrom: str, start: int, end: int) -> str:
+    """Fetch a genomic region from the UCSC REST API (0-based, end-exclusive).
+
+    Returns the uppercase DNA string. Much faster than downloading the
+    full ~3 GB genome FASTA — only retrieves the exact region needed.
+    """
+    params = urllib.parse.urlencode({
+        "genome": assembly,
+        "chrom": chrom,
+        "start": start,
+        "end": end,
+    })
+    url = f"https://api.genome.ucsc.edu/getData/sequence?{params}"
+    req = urllib.request.Request(url, headers={"User-Agent": "oligoclaude/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to fetch sequence from UCSC API for "
+            f"{chrom}:{start}-{end} ({assembly}): {e}\n"
+            "If you are offline, run `oligoclaude fetch-genome` to download "
+            "the full GRCh38 FASTA for local use."
+        ) from e
+
+    seq = data.get("dna", "")
+    if not seq:
+        raise RuntimeError(
+            f"UCSC API returned no sequence for {chrom}:{start}-{end} ({assembly}). "
+            f"Response: {data}"
+        )
+    return seq.upper()
 
 
 # ---------- SpliceAI weights ----------
