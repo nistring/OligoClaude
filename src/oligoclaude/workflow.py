@@ -19,6 +19,7 @@ from .core import (
     load_reference_sequence,
 )
 from .output import (
+    build_ucsc_url,
     correlation_plot,
     export_all,
     open_ucsc_browser,
@@ -69,6 +70,7 @@ def run_workflow(
     cfg.results_dir.mkdir(parents=True, exist_ok=True)
 
     cfg.fasta_path = resolve_fasta_path(cfg.fasta_path, verbose=verbose)
+    _require_exon_intervals(cfg)
 
     if verbose:
         print(f"Config: {config_path}")
@@ -245,19 +247,19 @@ def run_workflow(
     if exp_bed:
         bed_files.append(exp_bed)
 
-    ucsc_url: Optional[str] = None
-    if open_browser:
-        exon_start, exon_end = cfg.exon_intervals
-        ucsc_url = open_ucsc_browser(
-            assembly=cfg.assembly,
-            chrom=chrom,
-            exon_start=exon_start,
-            exon_end=exon_end,
-            flank=cfg.flank,
-            bed_files=bed_files,
-        )
-        if verbose and ucsc_url:
-            print(f"Opened UCSC Genome Browser (URL length: {len(ucsc_url):,} chars)")
+    exon_start, exon_end = cfg.exon_intervals
+    ucsc_fn = open_ucsc_browser if open_browser else build_ucsc_url
+    ucsc_url = ucsc_fn(
+        assembly=cfg.assembly,
+        chrom=chrom,
+        exon_start=exon_start,
+        exon_end=exon_end,
+        flank=cfg.flank,
+        bed_files=bed_files,
+    )
+    if verbose and ucsc_url:
+        verb = "Opened" if open_browser else "Built"
+        print(f"{verb} UCSC Genome Browser URL ({len(ucsc_url):,} chars)")
 
     ucsc = _build_ucsc_instructions(cfg.assembly, bed_files)
 
@@ -270,6 +272,59 @@ def run_workflow(
         ucsc_url=ucsc_url,
         n_candidates=len(candidates),
     )
+
+
+class ExonIntervalsRequired(RuntimeError):
+    """Raised when a run is started without exon_intervals and the user
+    must pick one. The message embeds the list of candidate exons from
+    mygene.info so the caller (CLI user, or MCP-calling Claude) can present
+    choices and retry with an explicit exon."""
+
+
+def _require_exon_intervals(cfg: OligoConfig) -> None:
+    """Validate that the user has specified an exon, listing options if not.
+
+    Does NOT auto-pick an exon — only the user can say which exon to target
+    for skipping/inclusion. If exon_intervals is missing, this raises
+    `ExonIntervalsRequired` with the list of exons from the canonical
+    transcript so the caller can surface them to the user.
+    """
+    if cfg.exon_intervals is not None:
+        return
+
+    from .resources import canonical_transcript_exons, lookup_gene_info
+
+    info = lookup_gene_info(cfg.gene_symbol, cfg.assembly)
+    transcript_id, exons, cdsstart, cdsend = canonical_transcript_exons(info)
+    lines = [
+        f"`exon_intervals` is required but missing.",
+        f"Gene:       {cfg.gene_symbol}",
+        f"Assembly:   {cfg.assembly}",
+        f"Chromosome: {info['chrom']}   Strand: {info['strand']}",
+        f"Transcript: {transcript_id}   ({len(exons)} exons)",
+    ]
+    if cdsstart is not None and cdsend is not None:
+        lines.append(f"CDS:        {cdsstart}-{cdsend}")
+    lines.append("")
+    lines.append("Candidate exons (1-based index, start-end):")
+    for i, (a, b) in enumerate(exons, start=1):
+        flags = []
+        if cdsstart is not None and cdsend is not None:
+            if b < cdsstart or a > cdsend:
+                flags.append("UTR")
+            elif a < cdsstart or b > cdsend:
+                flags.append("CDS-edge")
+        if i == 1:
+            flags.append("first")
+        if i == len(exons):
+            flags.append("last")
+        tag = f"  [{','.join(flags)}]" if flags else ""
+        lines.append(f"  {i:>3}. {a}-{b}  (length {b - a} bp){tag}")
+    lines.append("")
+    lines.append(
+        "Add one of these to your config as:  \"exon_intervals\": [start, end]"
+    )
+    raise ExonIntervalsRequired("\n".join(lines))
 
 
 def _infer_chrom(cfg: OligoConfig) -> str:

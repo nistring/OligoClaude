@@ -223,8 +223,10 @@ def score_asos_alphagenome(
 # ============================================================
 
 _MANE_10000_L = 32
-_MANE_10000_W = [11] * 8 + [21] * 4 + [41] * 4
-_MANE_10000_AR = [1] * 4 + [4] * 4 + [10] * 4 + [25] * 4
+# W and AR must be numpy arrays — the openspliceai constructor does
+# `np.sum(AR * (W - 1))` which requires element-wise ops, not list arithmetic.
+_MANE_10000_W = np.array([11] * 8 + [21] * 4 + [41] * 4, dtype=np.int64)
+_MANE_10000_AR = np.array([1] * 4 + [4] * 4 + [10] * 4 + [25] * 4, dtype=np.int64)
 
 
 def _instantiate_spliceai(SpliceAI_cls):
@@ -233,24 +235,25 @@ def _instantiate_spliceai(SpliceAI_cls):
     `openspliceai>=0.0.5` uses `SpliceAI(L, W, AR, apply_softmax=True)` with
     the MANE-10000nt arrays defined in
     `openspliceai/train/train.py::initialize_model_and_optim`. Older
-    signatures are probed as fallbacks and the last error is surfaced for
-    diagnosability.
+    signatures are probed as fallbacks; all collected errors are surfaced
+    so the real failure isn't hidden behind the last fallback's error.
     """
     attempts = (
-        ((_MANE_10000_L, _MANE_10000_W, _MANE_10000_AR), {}),
-        ((_MANE_10000_L, _MANE_10000_W, _MANE_10000_AR), {"apply_softmax": True}),
-        ((), {"L": CL_MAX}),
-        ((), {"flanking_size": CL_MAX}),
-        ((), {}),
+        ("MANE-10000nt positional", (_MANE_10000_L, _MANE_10000_W, _MANE_10000_AR), {}),
+        ("MANE-10000nt + apply_softmax", (_MANE_10000_L, _MANE_10000_W, _MANE_10000_AR), {"apply_softmax": True}),
+        ("legacy L=CL_MAX kwarg", (), {"L": CL_MAX}),
+        ("legacy flanking_size kwarg", (), {"flanking_size": CL_MAX}),
+        ("no-args", (), {}),
     )
-    last_err: Optional[Exception] = None
-    for args, kwargs in attempts:
+    errors: list[str] = []
+    for label, args, kwargs in attempts:
         try:
             return SpliceAI_cls(*args, **kwargs)
         except (TypeError, ValueError) as e:
-            last_err = e
+            errors.append(f"  [{label}]: {type(e).__name__}: {e}")
+    joined = "\n".join(errors)
     raise RuntimeError(
-        f"Could not instantiate SpliceAI class. Last error: {last_err!r}. "
+        f"Could not instantiate SpliceAI class. Attempts:\n{joined}\n"
         "Please report your openspliceai version (`pip show openspliceai`)."
     )
 

@@ -2,7 +2,7 @@
 
 from .config import OligoConfig, load_config
 from .core import AsoCandidate, enumerate_sliding, enumerate_from_experimental
-from .workflow import WorkflowResult, run_workflow
+from .workflow import ExonIntervalsRequired, WorkflowResult, run_workflow
 
 __version__ = "0.1.0"
 
@@ -14,4 +14,5 @@ __all__ = [
     "enumerate_from_experimental",
     "WorkflowResult",
     "run_workflow",
+    "ExonIntervalsRequired",
 ]

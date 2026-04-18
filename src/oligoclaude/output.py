@@ -212,7 +212,7 @@ def write_experimental_bed(
     return path
 
 
-def open_ucsc_browser(
+def build_ucsc_url(
     assembly: str,
     chrom: str,
     exon_start: int,
@@ -220,11 +220,11 @@ def open_ucsc_browser(
     flank: tuple[int, int],
     bed_files: list[Path],
 ) -> Optional[str]:
-    """Auto-open the UCSC Genome Browser with compact BED tracks loaded.
+    """Build a UCSC Genome Browser URL with compact BED tracks embedded.
 
-    Reads the compact (non-full) BED files, URL-encodes their content into
-    the `hgct_customText` parameter, and opens the browser at the target
-    exon ± flank. Returns the URL, or None if there are no tracks.
+    Reads the compact (non-full) BED files and URL-encodes their content
+    into the `hgct_customText` parameter. Returns the URL, or None if
+    there are no compact tracks to embed.
     """
     compact_files = [f for f in bed_files if not f.name.endswith("_full.bed")]
     if not compact_files:
@@ -240,8 +240,24 @@ def open_ucsc_browser(
         "position": position,
         "hgct_customText": bed_content,
     })
-    url = f"https://genome.ucsc.edu/cgi-bin/hgTracks?{params}"
+    return f"https://genome.ucsc.edu/cgi-bin/hgTracks?{params}"
 
+
+def open_ucsc_browser(
+    assembly: str,
+    chrom: str,
+    exon_start: int,
+    exon_end: int,
+    flank: tuple[int, int],
+    bed_files: list[Path],
+) -> Optional[str]:
+    """Build the UCSC URL and attempt to open it in the default browser.
+
+    Returns the URL even if the browser-open fails (e.g. headless env).
+    """
+    url = build_ucsc_url(assembly, chrom, exon_start, exon_end, flank, bed_files)
+    if not url:
+        return None
     try:
         webbrowser.open(url)
     except Exception:

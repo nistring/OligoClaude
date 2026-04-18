@@ -16,7 +16,6 @@ _DEFAULT_GTF_URL = (
 @dataclass
 class OligoConfig:
     gene_symbol: str
-    exon_intervals: tuple[int, int]
     strand: str
     assembly: str
     gtf_url: str
@@ -28,6 +27,7 @@ class OligoConfig:
     ASO_length: int
     flank: tuple[int, int]
 
+    exon_intervals: Optional[tuple[int, int]] = None
     fasta_path: Optional[Path] = None
     dna_api_key: Optional[str] = None
     aso_step: int = 1
@@ -62,12 +62,15 @@ def load_config(path: Path) -> OligoConfig:
             f"target_mode must be 'exclude' or 'include', got {raw.get('target_mode')!r}"
         )
 
-    exon = raw["exon_intervals"]
+    raw_exon = raw.get("exon_intervals")
+    exon_intervals: Optional[tuple[int, int]] = (
+        (int(raw_exon[0]), int(raw_exon[1])) if raw_exon else None
+    )
     flank = raw.get("flank", [200, 200])
 
     cfg = OligoConfig(
         gene_symbol=raw["gene_symbol"],
-        exon_intervals=(int(exon[0]), int(exon[1])),
+        exon_intervals=exon_intervals,
         strand=raw.get("strand", "+"),
         assembly=raw.get("assembly", "hg38"),
         fasta_path=_resolve(raw.get("fasta_path")),

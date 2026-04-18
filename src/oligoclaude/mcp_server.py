@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Optional
 
 from .resources import ENV_VAR, get_alphagenome_api_key
-from .workflow import WorkflowResult, run_workflow
+from .workflow import ExonIntervalsRequired, WorkflowResult, run_workflow
 
 
 def _build_mcp():
@@ -79,14 +79,27 @@ def _build_mcp():
         if not cfg_path.exists():
             raise FileNotFoundError(f"Config file not found: {cfg_path}")
 
-        result: WorkflowResult = run_workflow(
-            cfg_path,
-            skip_alphagenome=skip_alphagenome,
-            skip_spliceai=skip_spliceai,
-            samples_max=samples_max,
-            open_browser=False,
-        )
+        try:
+            result: WorkflowResult = run_workflow(
+                cfg_path,
+                skip_alphagenome=skip_alphagenome,
+                skip_spliceai=skip_spliceai,
+                samples_max=samples_max,
+                open_browser=False,
+            )
+        except ExonIntervalsRequired as e:
+            return {
+                "status": "exon_intervals_required",
+                "message": str(e),
+                "hint": (
+                    "The config is missing `exon_intervals`. Ask the user which "
+                    "exon to target, then add `\"exon_intervals\": [start, end]` "
+                    "to the config JSON and call this tool again. You can also "
+                    "call `list_gene_exons(gene_symbol)` directly to get the list."
+                ),
+            }
         return {
+            "status": "ok",
             "scores_csv": str(result.scores_csv) if result.scores_csv else None,
             "bed_files": [str(p) for p in result.bed_files],
             "correlation_plot": (
@@ -96,6 +109,62 @@ def _build_mcp():
             "ucsc_instructions": result.ucsc_instructions,
             "ucsc_url": result.ucsc_url,
             "n_candidates": result.n_candidates,
+        }
+
+    @mcp.tool()
+    def list_gene_exons(gene_symbol: str, assembly: str = "hg38") -> dict:
+        """List all exons of a gene's canonical transcript via mygene.info.
+
+        Use this when the user wants to target a specific gene but hasn't
+        said which exon. Present the returned exons to the user (with
+        1-based index, coordinates, UTR/CDS annotation) and ask which one
+        they want to exclude/include with an ASO.
+
+        Args:
+            gene_symbol: HGNC-style symbol, e.g. "SETD5".
+            assembly: Genome assembly ("hg38" default, or "hg19").
+
+        Returns:
+            A dict with: gene_symbol, assembly, chrom, strand, transcript,
+            cdsstart, cdsend, and `exons` — a list of
+            `{index, start, end, length, annotation}` rows (annotation is
+            "UTR", "CDS-edge", "CDS", "first", or "last").
+        """
+        from .resources import canonical_transcript_exons, lookup_gene_info
+
+        info = lookup_gene_info(gene_symbol, assembly)
+        transcript_id, exons, cdsstart, cdsend = canonical_transcript_exons(info)
+        annotated = []
+        for i, (a, b) in enumerate(exons, start=1):
+            if cdsstart is not None and cdsend is not None:
+                if b < cdsstart or a > cdsend:
+                    anno = "UTR"
+                elif a < cdsstart or b > cdsend:
+                    anno = "CDS-edge"
+                else:
+                    anno = "CDS"
+            else:
+                anno = "unknown"
+            if i == 1:
+                anno = f"first/{anno}"
+            elif i == len(exons):
+                anno = f"last/{anno}"
+            annotated.append({
+                "index": i,
+                "start": a,
+                "end": b,
+                "length": b - a,
+                "annotation": anno,
+            })
+        return {
+            "gene_symbol": gene_symbol,
+            "assembly": assembly,
+            "chrom": info["chrom"],
+            "strand": info["strand"],
+            "transcript": transcript_id,
+            "cdsstart": cdsstart,
+            "cdsend": cdsend,
+            "exons": annotated,
         }
 
     return mcp

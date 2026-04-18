@@ -202,14 +202,8 @@ def resolve_fasta_path(
 
 # ---------- UCSC online sequence fetch ----------
 
-def lookup_gene_chromosome(gene_symbol: str, assembly: str = "hg38") -> str:
-    """Look up a gene's chromosome via the mygene.info REST API.
-
-    Returns the UCSC-style chromosome string (e.g. `chr3`). Works without
-    AlphaGenome or a local GTF, so it unblocks `--skip-alphagenome` runs
-    driven by only a gene symbol.
-    """
-    pos_field = "genomic_pos_hg19" if assembly.lower() in {"hg19", "grch37"} else "genomic_pos"
+def _mygene_detail(gene_symbol: str) -> dict:
+    """Resolve a gene symbol to its full mygene.info record."""
     params = urllib.parse.urlencode({
         "q": f"symbol:{gene_symbol}",
         "species": "human",
@@ -236,21 +230,81 @@ def lookup_gene_chromosome(gene_symbol: str, assembly: str = "hg38") -> str:
     req = urllib.request.Request(detail_url, headers={"User-Agent": "oligoclaude/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            detail = json.loads(resp.read().decode("utf-8"))
+            return json.loads(resp.read().decode("utf-8"))
     except Exception as e:
         raise RuntimeError(
             f"Failed to fetch gene detail for {gene_symbol!r} (id={gene_id}): {e}"
         ) from e
 
+
+def lookup_gene_info(gene_symbol: str, assembly: str = "hg38") -> dict:
+    """Resolve a gene symbol to chromosome, strand, and transcript exons.
+
+    Returns a dict with keys: `chrom` (UCSC style, e.g. `chr3`),
+    `strand` (`+` or `-`), `gene_start`, `gene_end`, `transcripts` (list of
+    dicts with `transcript`, `cdsstart`, `cdsend`, `exons: [[start, end], ...]`).
+
+    Uses `exons` for hg38 and `exons_hg19` for hg19. Works without
+    AlphaGenome, so it unblocks NL-driven runs that specify only a gene.
+    """
+    detail = _mygene_detail(gene_symbol)
+    pos_field = "genomic_pos_hg19" if assembly.lower() in {"hg19", "grch37"} else "genomic_pos"
+    exons_field = "exons_hg19" if assembly.lower() in {"hg19", "grch37"} else "exons"
+
     pos = detail.get(pos_field)
     if isinstance(pos, list):
         pos = pos[0] if pos else None
     if not pos or "chr" not in pos:
-        raise RuntimeError(
-            f"mygene.info has no {pos_field} for {gene_symbol!r} (id={gene_id})"
-        )
+        raise RuntimeError(f"mygene.info has no {pos_field} for {gene_symbol!r}")
+
     chrom = str(pos["chr"])
-    return chrom if chrom.startswith("chr") else f"chr{chrom}"
+    chrom = chrom if chrom.startswith("chr") else f"chr{chrom}"
+    strand = "+" if int(pos.get("strand", 1)) >= 0 else "-"
+
+    raw_tx = detail.get(exons_field) or []
+    transcripts: list[dict] = []
+    for tx in raw_tx:
+        exons = tx.get("position") or []
+        if not exons:
+            continue
+        transcripts.append({
+            "transcript": tx.get("transcript"),
+            "cdsstart": int(tx["cdsstart"]) if tx.get("cdsstart") is not None else None,
+            "cdsend": int(tx["cdsend"]) if tx.get("cdsend") is not None else None,
+            "exons": [[int(a), int(b)] for a, b in exons],
+        })
+
+    return {
+        "chrom": chrom,
+        "strand": strand,
+        "gene_start": int(pos.get("start", 0)),
+        "gene_end": int(pos.get("end", 0)),
+        "transcripts": transcripts,
+    }
+
+
+def lookup_gene_chromosome(gene_symbol: str, assembly: str = "hg38") -> str:
+    """Look up just the chromosome for a gene symbol (convenience wrapper)."""
+    return lookup_gene_info(gene_symbol, assembly)["chrom"]
+
+
+def canonical_transcript_exons(gene_info: dict) -> tuple[str, list[list[int]], Optional[int], Optional[int]]:
+    """Return (transcript_id, exons, cdsstart, cdsend) for the canonical-ish tx.
+
+    Picks the transcript with the most exons as a proxy for the canonical one.
+    Does not auto-choose a target exon — callers are responsible for asking
+    the user to select one explicitly.
+    """
+    transcripts = gene_info.get("transcripts") or []
+    if not transcripts:
+        raise RuntimeError("mygene.info returned no transcripts for this gene.")
+    tx = max(transcripts, key=lambda t: len(t["exons"]))
+    return (
+        tx.get("transcript") or "unknown",
+        tx["exons"],
+        tx.get("cdsstart"),
+        tx.get("cdsend"),
+    )
 
 
 def fetch_sequence_ucsc(assembly: str, chrom: str, start: int, end: int) -> str:
