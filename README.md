@@ -85,9 +85,10 @@ with `oligomcp fetch-ontology-terms` (needs AlphaGenome key).
 
 ## Outputs
 
-Land under `results/<gene_symbol>/`. All BED9 — usable in UCSC Genome
-Browser (upload at <https://genome.ucsc.edu/cgi-bin/hgCustom>), IGV,
-JBrowse, etc.
+Land under `results/<gene_symbol>/<YYYYMMDD_HHMMSS>/` — each run gets
+its own timestamped subdirectory, so reruns never overwrite prior
+output. All BED9, usable in UCSC Genome Browser (upload at
+<https://genome.ucsc.edu/cgi-bin/hgCustom>), IGV, JBrowse, etc.
 
 | File | Contents |
 |---|---|

@@ -120,14 +120,21 @@ def _parse_output_types(names: list[str]) -> list[Any]:
 
 
 def _filter_td(td, cfg: OligoConfig):
-    """Apply config track-name + strand filters to an AlphaGenome TrackData."""
+    """Apply config track-name + strand filters to an AlphaGenome TrackData.
+
+    For a + strand gene we keep tracks that are NOT on the positive strand
+    (i.e. `-` strand + unstranded), and vice versa. The ASO's antisense is
+    opposite to the gene's mRNA sense, so the tracks that actually report
+    on the ASO's target are on the opposite strand (plus any unstranded
+    library, which pools both).
+    """
     if td is None:
         return None
     if cfg.track_filter:
         td = td.filter_tracks([cfg.track_filter in n for n in td.names])
     strand_filter = {
-        "+": "filter_to_positive_strand",
-        "-": "filter_to_negative_strand",
+        "+": "filter_to_nonpositive_strand",
+        "-": "filter_to_nonnegative_strand",
     }.get(str(cfg.strand).lower())
     if strand_filter and hasattr(td, strand_filter):
         td = getattr(td, strand_filter)()

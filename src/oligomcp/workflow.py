@@ -1,6 +1,7 @@
 """End-to-end OligoMCP workflow — shared by CLI and MCP server."""
 from __future__ import annotations
 
+import datetime as _dt
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -45,7 +46,10 @@ def run_workflow(
 ) -> WorkflowResult:
     """Run the full OligoMCP pipeline and return paths + stats."""
     cfg = load_config(Path(config_path))
-    cfg.results_dir = Path(cfg.results_dir) / cfg.gene_symbol
+    # Nest each run under a timestamped subdirectory so reruns never
+    # overwrite prior output. Format: YYYYMMDD_HHMMSS (local time).
+    run_id = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    cfg.results_dir = Path(cfg.results_dir) / cfg.gene_symbol / run_id
     cfg.results_dir.mkdir(parents=True, exist_ok=True)
 
     cfg.fasta_path = resolve_fasta_path(cfg.fasta_path, verbose=verbose)
