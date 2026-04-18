@@ -16,6 +16,7 @@ of the AlphaGenome helpers come from `/home/nistring/AlphaGenome_ASO/aso.ipynb`.
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -229,44 +230,68 @@ _MANE_10000_W = np.array([11] * 8 + [21] * 4 + [41] * 4, dtype=np.int64)
 _MANE_10000_AR = np.array([1] * 4 + [4] * 4 + [10] * 4 + [25] * 4, dtype=np.int64)
 
 
+_SPLICEAI_CACHE: dict[str, tuple[list[Any], Any]] = {}
+_SPLICEAI_LOCK = threading.Lock()
+
+
 def setup_spliceai(
     threads: Optional[int] = None, weights_dir: Optional[Path] = None
 ) -> tuple[list[Any], Any]:
-    """Load the MANE-10000nt 5-model ensemble on CPU.
+    """Load (or retrieve cached) MANE-10000nt 5-model ensemble on CPU.
+
+    Loaded models are cached at module level and reused across calls —
+    critical for remote HTTP deployments where reloading 5 × ~3 MB
+    checkpoints per request (~5-10 s) blows through MCP tool-call
+    timeouts. Thread-safe via double-checked locking (FastMCP's HTTP
+    transport may dispatch requests from multiple threads).
 
     Uses the vendored `SpliceAI` class from `oligoclaude._spliceai_model`
     (copied from openspliceai v0.0.5, MIT), so we avoid pulling in the
-    `openspliceai` package and its C-extension transitive deps (`mappy`,
-    `pysam`). Pretrained weights come from the OpenSpliceAI MANE-10000nt
-    release and load into the vendored class unchanged.
+    `openspliceai` package and its C-extension transitive deps.
     """
     import torch
 
     from ._spliceai_model import SpliceAI
     from .resources import ensure_spliceai_weights
 
-    torch.set_num_threads(threads or max(1, (os.cpu_count() or 2) // 2))
-    torch.set_grad_enabled(False)
-    device = torch.device("cpu")
-
     weights_dir = ensure_spliceai_weights(weights_dir)
-    pt_files = sorted(Path(weights_dir).glob("*.pt"))
-    if not pt_files:
-        raise RuntimeError(f"No .pt weight files found in {weights_dir}.")
+    cache_key = str(Path(weights_dir).resolve())
 
-    models: list[Any] = []
-    for pt in pt_files:
-        m = SpliceAI(_MANE_10000_L, _MANE_10000_W, _MANE_10000_AR)
-        state = torch.load(pt, map_location=device)
-        if isinstance(state, dict) and "state_dict" in state:
-            state = state["state_dict"]
-        try:
-            m.load_state_dict(state)
-        except RuntimeError:
-            m.load_state_dict({k.replace("module.", "", 1): v for k, v in state.items()})
-        m.eval().to(device)
-        models.append(m)
-    return models, device
+    cached = _SPLICEAI_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    with _SPLICEAI_LOCK:
+        cached = _SPLICEAI_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
+        torch.set_num_threads(threads or max(1, (os.cpu_count() or 2) // 2))
+        torch.set_grad_enabled(False)
+        device = torch.device("cpu")
+
+        pt_files = sorted(Path(weights_dir).glob("*.pt"))
+        if not pt_files:
+            raise RuntimeError(f"No .pt weight files found in {weights_dir}.")
+
+        models: list[Any] = []
+        for pt in pt_files:
+            m = SpliceAI(_MANE_10000_L, _MANE_10000_W, _MANE_10000_AR)
+            state = torch.load(pt, map_location=device)
+            if isinstance(state, dict) and "state_dict" in state:
+                state = state["state_dict"]
+            try:
+                m.load_state_dict(state)
+            except RuntimeError:
+                m.load_state_dict(
+                    {k.replace("module.", "", 1): v for k, v in state.items()}
+                )
+            m.eval().to(device)
+            models.append(m)
+
+        result = (models, device)
+        _SPLICEAI_CACHE[cache_key] = result
+        return result
 
 
 def _build_base_tensor(

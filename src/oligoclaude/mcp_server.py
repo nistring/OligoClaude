@@ -36,6 +36,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -57,6 +58,43 @@ _DEFAULT_GTF_URL = (
 _MAX_CANDIDATES_REMOTE = 300
 
 mcp = FastMCP("oligoclaude")
+
+
+def _warm_spliceai_background() -> None:
+    """Load SpliceAI models in a background thread at server startup.
+
+    Remote Horizon containers otherwise pay 10-15 s of cold-start per
+    container lifetime on the first `predict_aso_efficacy_inline` call
+    (FTP download of ~14 MB of weights + 5 × torch.load of ~3 MB each),
+    which stacks with the MCP client tool-call timeout. Running the load
+    in a daemon thread at import time means:
+
+      - Horizon's 60-second port-readiness wait absorbs the cold-start
+        instead of the first request.
+      - If weights download fails (no network, FTP down), the server
+        still starts; only SpliceAI-dependent calls surface the error
+        later. `list_gene_exons` and `skip_spliceai=True` runs are
+        unaffected.
+
+    Disable by setting OLIGOCLAUDE_PRELOAD_SPLICEAI=0 (useful for tests
+    or AlphaGenome-only use).
+    """
+    def _load() -> None:
+        try:
+            from .predict import setup_spliceai
+            setup_spliceai()
+        except Exception as e:  # noqa: BLE001 — log and swallow, don't crash server
+            sys.stderr.write(
+                f"[oligoclaude-mcp] SpliceAI preload failed: {e!r}. "
+                "The server is up; SpliceAI-dependent calls will retry "
+                "the load on demand.\n"
+            )
+
+    threading.Thread(target=_load, daemon=True, name="spliceai-preload").start()
+
+
+if os.environ.get("OLIGOCLAUDE_PRELOAD_SPLICEAI", "1") != "0":
+    _warm_spliceai_background()
 
 
 # ---------- helpers ----------
