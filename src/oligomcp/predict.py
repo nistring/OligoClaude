@@ -9,9 +9,11 @@ exon usage relative to gene-body baseline:
 
 AlphaGenome evaluates this over a resized gene interval via its hosted
 `predict_sequences` API. SpliceAI runs the OpenSpliceAI MANE-10000nt
-5-model ensemble on CPU over a fixed (SL+CL) window centered on the exon,
-using the full SL window as the "body" baseline. Ports of the formula and
-of the AlphaGenome helpers come from `/home/nistring/AlphaGenome_ASO/aso.ipynb`.
+model (a single model by default; set `OLIGOMCP_SPLICEAI_N_MODELS=5` to
+use the full 5-seed ensemble) on CPU over a fixed (SL+CL) window
+centered on the exon, using the full SL window as the "body" baseline.
+Ports of the formula and of the AlphaGenome helpers come from
+`/home/nistring/AlphaGenome_ASO/aso.ipynb`.
 """
 from __future__ import annotations
 
@@ -254,15 +256,17 @@ def _default_n_models() -> int:
 def setup_spliceai(
     threads: Optional[int] = None, weights_dir: Optional[Path] = None
 ) -> tuple[list[Any], Any]:
-    """Load (or retrieve cached) MANE-10000nt model ensemble on CPU.
+    """Load (or retrieve cached) MANE-10000nt SpliceAI models on CPU.
 
-    Loaded models are cached at module level and reused across calls —
-    critical for remote HTTP deployments where reloading checkpoints per
-    request (~5-10 s per model) blows through MCP tool-call timeouts.
-    Thread-safe via double-checked locking.
+    Loaded models are cached at module level and reused across every
+    subsequent call, saving ~5-10 s per model on each request that would
+    otherwise re-read the checkpoints. Thread-safe via double-checked
+    locking (the MCP server may dispatch tool calls from multiple
+    threads).
 
-    Number of models loaded is determined by `_default_n_models()` (see
-    docstring): 5 locally, 1 on Horizon, override via env var.
+    Number of models loaded is determined by `_default_n_models()` —
+    one model by default, set `OLIGOMCP_SPLICEAI_N_MODELS=5` for the
+    full ensemble.
 
     Uses the vendored `SpliceAI` class from `oligomcp._spliceai_model`
     (copied from openspliceai v0.0.5, MIT), so we avoid pulling in the

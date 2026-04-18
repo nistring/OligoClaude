@@ -1,34 +1,31 @@
-"""MCP server exposing OligoMCP as a Claude connector.
+"""MCP server exposing OligoMCP as a Claude / MCP-compatible connector.
 
-Two deployment modes, same tools:
+Runs locally as a stdio MCP server, registered via:
+    pip install -e .
+    claude mcp add oligomcp -- oligomcp-mcp
 
-1. Local stdio server (for Claude Desktop / Claude Code):
-       pip install -e .
-       claude mcp add oligomcp -- oligomcp-mcp
-
-2. Remote HTTP server on Prefect Horizon (FastMCP Cloud):
-       Sign in at https://horizon.prefect.io with GitHub → select this repo.
-       Entrypoint: src/oligomcp/mcp_server.py:mcp
-       Auto-redeploys on push to main. URL: https://<name>.fastmcp.app/mcp
+(or the equivalent in Claude Desktop, Cursor, Cline, Continue, Zed,
+Goose, etc. — see README.md for per-client configuration.)
 
 Tools exposed:
 
 - `list_gene_exons(gene_symbol, assembly)` — discover exons of a gene's
   canonical transcript (mygene.info, no AlphaGenome key needed).
 
-- `predict_aso_efficacy_inline(gene_symbol, exon_intervals, ...)` — run the
-  full workflow from tool arguments (no config file, no disk). Accepts an
-  optional `alphagenome_api_key` per call; returns CSV + BED content +
-  UCSC URL inline. Intended for remote HTTP deployments.
+- `predict_aso_efficacy_inline(gene_symbol, exon_intervals, ...)` — run
+  the full workflow from tool arguments (no config file, no disk).
+  Accepts an optional `alphagenome_api_key` per call; returns CSV + BED
+  content + UCSC URL inline. Convenient whenever you'd rather describe
+  the run in tool arguments than maintain a JSON config.
 
-- `predict_aso_efficacy(config_path, ...)` — the original file-based tool,
-  for local stdio use where both caller and server share a filesystem.
+- `predict_aso_efficacy(config_path, ...)` — traditional file-based
+  workflow; reproducible local runs driven from a JSON config.
 
 Credential resolution:
-    1. `alphagenome_api_key` tool argument (remote — per-request)
+    1. `alphagenome_api_key` tool argument (per-request, in-memory)
     2. $ALPHAGENOME_API_KEY environment variable
-    3. ~/.oligomcp/credentials.json (local only)
-    4. Legacy `dna_api_key` field inside the config JSON
+    3. ~/.oligomcp/credentials.json (saved via `oligomcp set-api-key`)
+    4. Legacy `dna_api_key` field inside the config JSON (discouraged)
 """
 from __future__ import annotations
 
@@ -40,12 +37,11 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-# Use the `fastmcp` package's FastMCP (a.k.a. FastMCP v2) rather than the
-# `mcp.server.fastmcp` one (v1). fastmcp 2.12.3's CLI — the version Prefect
-# Horizon pins — has a bug in its `run_v1_server` wrapper where it calls
+# Use the `fastmcp` package's FastMCP (v2) rather than `mcp.server.fastmcp`
+# (v1): fastmcp's `run` CLI has a bug in its v1-wrapper path where it calls
 # the v1 `.run()` (which does `asyncio.run()` internally) from inside an
 # already-running async context, producing "Already running asyncio in
-# this thread". v2 instances go through the native code path and work.
+# this thread". v2 instances take the native code path and work everywhere.
 from fastmcp import FastMCP
 
 from .resources import ENV_VAR, get_alphagenome_api_key
@@ -55,7 +51,7 @@ _DEFAULT_GTF_URL = (
     "https://storage.googleapis.com/alphagenome/reference/gencode/hg38/"
     "gencode.v46.annotation.gtf.gz.feather"
 )
-_MAX_CANDIDATES_REMOTE = 300
+_MAX_CANDIDATES_INLINE = 300
 
 mcp = FastMCP("oligomcp")
 
@@ -63,21 +59,20 @@ mcp = FastMCP("oligomcp")
 def _warm_spliceai_background() -> None:
     """Load SpliceAI models in a background thread at server startup.
 
-    Remote Horizon containers otherwise pay 10-15 s of cold-start per
-    container lifetime on the first `predict_aso_efficacy_inline` call
-    (FTP download of ~14 MB of weights + 5 × torch.load of ~3 MB each),
-    which stacks with the MCP client tool-call timeout. Running the load
-    in a daemon thread at import time means:
+    Model load takes a second or two and is the main contributor to
+    first-request latency on the SpliceAI path. Running it in a daemon
+    thread at import time means:
 
-      - Horizon's 60-second port-readiness wait absorbs the cold-start
-        instead of the first request.
-      - If weights download fails (no network, FTP down), the server
-        still starts; only SpliceAI-dependent calls surface the error
-        later. `list_gene_exons` and `skip_spliceai=True` runs are
-        unaffected.
+      - The MCP handshake returns immediately; the host doesn't wait.
+      - When the first `predict_aso_efficacy_*` call arrives, the cache
+        is usually warm, so scoring kicks off without delay.
+      - If the load fails (e.g. bundled weights are missing and no
+        network is available), the server still starts; only
+        SpliceAI-dependent calls surface the error later. `list_gene_exons`
+        and `skip_spliceai=True` runs are unaffected.
 
-    Disable by setting OLIGOMCP_PRELOAD_SPLICEAI=0 (useful for tests
-    or AlphaGenome-only use).
+    Disable with `OLIGOMCP_PRELOAD_SPLICEAI=0` (useful for tests or
+    AlphaGenome-only use where torch import is unwanted overhead).
     """
     def _load() -> None:
         try:
@@ -213,14 +208,17 @@ def predict_aso_efficacy_inline(
 ) -> dict:
     """Run the full ASO scoring pipeline from arguments, return results inline.
 
-    Designed for remote HTTP deployments: no config file required, no
-    filesystem access on the caller side. Takes each config field as a
-    tool argument; writes CSV/BEDs to a server-side temp directory and
-    returns their contents as strings plus a UCSC URL.
+    No config file required: describe the run via tool arguments and the
+    server writes CSV/BEDs to a temp directory, reads them back into
+    strings, and returns everything in the response payload (including a
+    pre-loaded UCSC Genome Browser URL). Use this when driving the tool
+    from natural language, or any time maintaining a JSON config isn't
+    worth it.
 
-    Safety cap: at most 300 sliding-window ASO candidates. If you'd get
-    more than that with the given `aso_step` and `flank`, the tool
-    returns status="too_many_candidates" with a suggested `aso_step`.
+    Safety cap: at most 300 sliding-window ASO candidates per call. If
+    you'd get more than that with the given `aso_step` and `flank`, the
+    tool returns status="too_many_candidates" with a suggested
+    `aso_step` — raise the step (or narrow the flank) and retry.
 
     Args:
         gene_symbol: HGNC-style symbol, e.g. "SETD5".
@@ -266,16 +264,16 @@ def predict_aso_efficacy_inline(
         }
 
     n_est = _estimate_candidate_count(exon_intervals, flank, aso_length, aso_step)
-    if n_est > _MAX_CANDIDATES_REMOTE:
+    if n_est > _MAX_CANDIDATES_INLINE:
         scan_width = (exon_intervals[1] - exon_intervals[0]) + flank[0] + flank[1]
-        suggested_step = max(1, scan_width // _MAX_CANDIDATES_REMOTE + 1)
+        suggested_step = max(1, scan_width // _MAX_CANDIDATES_INLINE + 1)
         return {
             "status": "too_many_candidates",
             "n_estimated": n_est,
-            "limit": _MAX_CANDIDATES_REMOTE,
+            "limit": _MAX_CANDIDATES_INLINE,
             "hint": (
                 f"With aso_step={aso_step} you'd scan {n_est} candidates. "
-                f"Remote runs are capped at {_MAX_CANDIDATES_REMOTE} to keep "
+                f"Inline runs are capped at {_MAX_CANDIDATES_INLINE} to keep "
                 f"the request under a minute. Retry with aso_step>={suggested_step}."
             ),
         }
@@ -372,14 +370,16 @@ def predict_aso_efficacy(
     skip_spliceai: bool = False,
     samples_max: int = 20,
 ) -> dict:
-    """Predict ASO efficacy from a JSON config file (local-stdio only).
+    """Predict ASO efficacy from a JSON config file.
 
-    For remote HTTP use, call `predict_aso_efficacy_inline` instead — this
-    tool requires the config file to exist on the server's filesystem.
+    Reproducible local workflow — the config file must live on the same
+    filesystem as the server (which is always the case for stdio-based
+    MCP hosts like Claude Code / Claude Desktop / Cursor). If you'd
+    rather pass arguments directly without maintaining a config, use
+    `predict_aso_efficacy_inline` instead.
 
     Args:
-        config_path: Absolute path to an OligoMCP JSON config on the
-            server's filesystem.
+        config_path: Absolute path to an OligoMCP JSON config.
         skip_alphagenome: Skip AlphaGenome scoring (no API key needed).
         skip_spliceai: Skip SpliceAI scoring.
         samples_max: Top/bottom ASOs per compact BED track.

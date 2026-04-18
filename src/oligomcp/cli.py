@@ -131,14 +131,14 @@ def _cmd_init(args) -> int:
     print("=== OligoMCP one-time setup ===")
 
     if args.skip_spliceai:
-        print("\n[1/2] Skipping SpliceAI weight download (--skip-spliceai).")
+        print("\n[1/2] Skipping SpliceAI weight check (--skip-spliceai).")
     else:
-        print("\n[1/2] Downloading SpliceAI MANE-10000nt weights (~3 MB x 5)...")
+        print("\n[1/2] Ensuring SpliceAI MANE-10000nt weights are available...")
         try:
             path = ensure_spliceai_weights(verbose=True)
             print(f"  ✓ Weights ready at: {path}")
         except Exception as e:
-            print(f"  ! SpliceAI weight download failed: {e}")
+            print(f"  ! SpliceAI weight resolution failed: {e}")
             print("    You can retry later with `oligomcp fetch-spliceai-weights`.")
 
     print("\n[2/2] AlphaGenome API key")

@@ -360,14 +360,19 @@ def _bundled_weights_complete() -> bool:
 def ensure_spliceai_weights(
     cache_dir: Optional[Path] = None, *, verbose: bool = True
 ) -> Path:
-    """Resolve the MANE-10000nt 5-model ensemble location.
+    """Resolve the MANE-10000nt SpliceAI weights location.
 
     Resolution order:
       1. Explicit `cache_dir` if complete.
-      2. Bundled copy inside the installed package (`oligomcp/_spliceai_weights/`)
-         — used on Prefect Horizon where FTP outbound is blocked.
+      2. Bundled copy inside the installed package
+         (`oligomcp/_spliceai_weights/`) — the default, so SpliceAI runs
+         offline with zero configuration.
       3. User cache at `~/.oligomcp/spliceai/mane_10000nt/`, downloading
-         any missing files from the FTP mirror.
+         any missing files from the upstream FTP mirror as a fallback.
+
+    All 5 MANE-10000nt `.pt` files ship with the package (~14 MB total);
+    whether `setup_spliceai()` loads 1 of them (default) or all 5 is
+    controlled separately by `OLIGOMCP_SPLICEAI_N_MODELS`.
     """
     if cache_dir is not None:
         cache_dir = Path(cache_dir)
