@@ -312,19 +312,18 @@ def predict_aso_efficacy_inline(
     ontology_terms: Optional[list[str]] = None,
     track_filter: str = "polyA plus RNA-seq",
 ) -> dict:
-    """Run the full ASO scoring pipeline from arguments, return results inline.
+    """Run the full ASO scoring pipeline from arguments.
 
-    No config file required: describe the run via tool arguments and the
-    server writes CSV/BEDs to a temp directory, reads them back into
-    strings, and returns everything in the response payload (including a
-    pre-loaded UCSC Genome Browser URL). Use this when driving the tool
-    from natural language, or any time maintaining a JSON config isn't
-    worth it.
+    No config file required — describe the run via tool arguments and
+    the server writes CSV / BED / correlation files to
+    `results/<gene_symbol>/` (the MCP server's current working
+    directory, same layout as the file-based tool) and returns both
+    the on-disk paths and inline BED text in the response.
 
-    Safety cap: at most 300 sliding-window ASO candidates per call. If
-    you'd get more than that with the given `aso_step` and `flank`, the
-    tool returns status="too_many_candidates" with a suggested
-    `aso_step` — raise the step (or narrow the flank) and retry.
+    Safety cap: at most 300 sliding-window ASO candidates per call.
+    `status="too_many_candidates"` is returned with a suggested
+    `aso_step` when the estimate exceeds the cap — raise the step (or
+    narrow the flank) and retry.
 
     Args:
         gene_symbol: HGNC-style symbol, e.g. "SETD5".
@@ -344,16 +343,21 @@ def predict_aso_efficacy_inline(
         requested_outputs: AlphaGenome output types; defaults to
             ["RNA_SEQ", "SPLICE_SITE_USAGE"].
         ontology_terms: AlphaGenome ontology terms (cell types). Optional.
-        track_filter: AlphaGenome track-name substring filter.
+        track_filter: AlphaGenome track-name substring filter. Verify
+            the target CURIE has this descriptor via
+            `search_ontology_terms(track_filter=…)` — a mismatch
+            silently drops every AlphaGenome track.
 
     Returns:
         status: "ok" | "too_many_candidates" | "exon_intervals_required"
         n_candidates: int
-        scores: list of per-ASO dicts (aso_id, position, length, sequences, scores)
-        top_candidates: dict {source: [{aso_id, position, score, sequence}, ...]}
-            — samples_max top hits per source.
-        bed_tracks: dict {filename: bed_text} (compact BED, for manual upload
-            to UCSC / IGV / JBrowse).
+        scores_csv: str — path to the persisted per-ASO CSV.
+        bed_files: list[str] — paths to persisted BED files.
+        scores: list of per-ASO dicts (inline).
+        top_candidates: dict {source: [{aso_id, position, score, sequence}, …]}
+            — samples_max top hits per source (inline).
+        bed_tracks: dict {filename: bed_text} (compact BED, inline — for
+            immediate UCSC / IGV / JBrowse paste without re-reading disk).
     """
     if flank is None:
         flank = [200, 200]
@@ -382,9 +386,13 @@ def predict_aso_efficacy_inline(
             ),
         }
 
-    with tempfile.TemporaryDirectory(prefix="oligomcp_") as tmp:
-        tmpdir = Path(tmp)
-        cfg_data = {
+    # Config JSON is ephemeral (throwaway) — only the TSV / CSV / BED
+    # outputs need to survive. Those go to `./results/<gene_symbol>/`
+    # under the MCP server's CWD, same layout as the file-based tool.
+    cfg_name = f"{gene_symbol}_e{exon_intervals[0]}_{exon_intervals[1]}"
+    with tempfile.TemporaryDirectory(prefix="oligomcp_cfg_") as tmp:
+        cfg_path = Path(tmp) / f"{cfg_name}.json"
+        cfg_path.write_text(json.dumps({
             "gene_symbol": gene_symbol,
             "exon_intervals": list(exon_intervals),
             "assembly": assembly,
@@ -393,15 +401,13 @@ def predict_aso_efficacy_inline(
             "aso_step": aso_step,
             "flank": list(flank),
             "target_mode": target_mode,
-            "results_dir": str(tmpdir / "results"),
-            "data_dir": str(tmpdir),
+            "results_dir": "results",  # relative → resolves to CWD/results/
+            "data_dir": "data",
             "gtf_url": _DEFAULT_GTF_URL,
             "ontology_terms": ontology_terms,
             "requested_outputs": requested_outputs,
             "track_filter": track_filter,
-        }
-        cfg_path = tmpdir / "inline_config.json"
-        cfg_path.write_text(json.dumps(cfg_data))
+        }))
 
         try:
             result: WorkflowResult = run_workflow(
@@ -416,39 +422,44 @@ def predict_aso_efficacy_inline(
                 "message": str(e),
             }
 
-        scores = _scores_from_csv(result.scores_csv)
-        compact_beds = {
-            p.name: p.read_text()
-            for p in result.bed_files
-            if p.exists() and not p.name.endswith("_full.bed")
-        }
+    scores = _scores_from_csv(result.scores_csv)
+    compact_beds = {
+        p.name: p.read_text()
+        for p in result.bed_files
+        if p.exists() and not p.name.endswith("_full.bed")
+    }
 
-        score_cols = [
-            c for c in (scores[0].keys() if scores else [])
-            if c not in {"aso_id", "ASO_sequence", "ASO_antisense", "position",
-                         "length", "Measured (RT-PCR)", "Region (Exon)"}
+    score_cols = [
+        c for c in (scores[0].keys() if scores else [])
+        if c not in {"aso_id", "ASO_sequence", "ASO_antisense", "position",
+                     "length", "Measured (RT-PCR)", "Region (Exon)"}
+    ]
+    top: dict[str, list[dict]] = {}
+    for col in score_cols:
+        valid = [s for s in scores if s.get(col) is not None]
+        ranked = sorted(valid, key=lambda s: -abs(float(s[col])))
+        top[col] = [
+            {
+                "aso_id": s["aso_id"],
+                "position": s["position"],
+                "score": float(s[col]),
+                "ASO_antisense": s.get("ASO_antisense"),
+            }
+            for s in ranked[:samples_max]
         ]
-        top: dict[str, list[dict]] = {}
-        for col in score_cols:
-            valid = [s for s in scores if s.get(col) is not None]
-            ranked = sorted(valid, key=lambda s: -abs(float(s[col])))
-            top[col] = [
-                {
-                    "aso_id": s["aso_id"],
-                    "position": s["position"],
-                    "score": float(s[col]),
-                    "ASO_antisense": s.get("ASO_antisense"),
-                }
-                for s in ranked[:samples_max]
-            ]
 
-        return {
-            "status": "ok",
-            "n_candidates": result.n_candidates,
-            "scores": scores,
-            "top_candidates": top,
-            "bed_tracks": compact_beds,
-        }
+    return {
+        "status": "ok",
+        "n_candidates": result.n_candidates,
+        "scores_csv": str(result.scores_csv) if result.scores_csv else None,
+        "bed_files": [str(p) for p in result.bed_files],
+        "correlation_plot": (
+            str(result.correlation_plot) if result.correlation_plot else None
+        ),
+        "scores": scores,
+        "top_candidates": top,
+        "bed_tracks": compact_beds,
+    }
 
 
 @mcp.tool()
