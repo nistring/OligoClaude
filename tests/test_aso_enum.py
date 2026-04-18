@@ -1,7 +1,7 @@
 """Tests for aso_enum."""
 import pandas as pd
 
-from oligoclaude.core import (
+from oligomcp.core import (
     enumerate_from_experimental,
     enumerate_sliding,
     reverse_complement,

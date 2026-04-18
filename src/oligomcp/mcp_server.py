@@ -1,14 +1,14 @@
-"""MCP server exposing OligoClaude as a Claude connector.
+"""MCP server exposing OligoMCP as a Claude connector.
 
 Two deployment modes, same tools:
 
 1. Local stdio server (for Claude Desktop / Claude Code):
        pip install -e .
-       claude mcp add oligoclaude -- oligoclaude-mcp
+       claude mcp add oligomcp -- oligomcp-mcp
 
 2. Remote HTTP server on Prefect Horizon (FastMCP Cloud):
        Sign in at https://horizon.prefect.io with GitHub → select this repo.
-       Entrypoint: src/oligoclaude/mcp_server.py:mcp
+       Entrypoint: src/oligomcp/mcp_server.py:mcp
        Auto-redeploys on push to main. URL: https://<name>.fastmcp.app/mcp
 
 Tools exposed:
@@ -27,7 +27,7 @@ Tools exposed:
 Credential resolution:
     1. `alphagenome_api_key` tool argument (remote — per-request)
     2. $ALPHAGENOME_API_KEY environment variable
-    3. ~/.oligoclaude/credentials.json (local only)
+    3. ~/.oligomcp/credentials.json (local only)
     4. Legacy `dna_api_key` field inside the config JSON
 """
 from __future__ import annotations
@@ -57,7 +57,7 @@ _DEFAULT_GTF_URL = (
 )
 _MAX_CANDIDATES_REMOTE = 300
 
-mcp = FastMCP("oligoclaude")
+mcp = FastMCP("oligomcp")
 
 
 def _warm_spliceai_background() -> None:
@@ -76,7 +76,7 @@ def _warm_spliceai_background() -> None:
         later. `list_gene_exons` and `skip_spliceai=True` runs are
         unaffected.
 
-    Disable by setting OLIGOCLAUDE_PRELOAD_SPLICEAI=0 (useful for tests
+    Disable by setting OLIGOMCP_PRELOAD_SPLICEAI=0 (useful for tests
     or AlphaGenome-only use).
     """
     def _load() -> None:
@@ -85,7 +85,7 @@ def _warm_spliceai_background() -> None:
             setup_spliceai()
         except Exception as e:  # noqa: BLE001 — log and swallow, don't crash server
             sys.stderr.write(
-                f"[oligoclaude-mcp] SpliceAI preload failed: {e!r}. "
+                f"[oligomcp-mcp] SpliceAI preload failed: {e!r}. "
                 "The server is up; SpliceAI-dependent calls will retry "
                 "the load on demand.\n"
             )
@@ -93,7 +93,7 @@ def _warm_spliceai_background() -> None:
     threading.Thread(target=_load, daemon=True, name="spliceai-preload").start()
 
 
-if os.environ.get("OLIGOCLAUDE_PRELOAD_SPLICEAI", "1") != "0":
+if os.environ.get("OLIGOMCP_PRELOAD_SPLICEAI", "1") != "0":
     _warm_spliceai_background()
 
 
@@ -287,7 +287,7 @@ def predict_aso_efficacy_inline(
         os.environ[ENV_VAR] = alphagenome_api_key
 
     try:
-        with tempfile.TemporaryDirectory(prefix="oligoclaude_") as tmp:
+        with tempfile.TemporaryDirectory(prefix="oligomcp_") as tmp:
             tmpdir = Path(tmp)
             cfg_data = {
                 "gene_symbol": gene_symbol,
@@ -378,7 +378,7 @@ def predict_aso_efficacy(
     tool requires the config file to exist on the server's filesystem.
 
     Args:
-        config_path: Absolute path to an OligoClaude JSON config on the
+        config_path: Absolute path to an OligoMCP JSON config on the
             server's filesystem.
         skip_alphagenome: Skip AlphaGenome scoring (no API key needed).
         skip_spliceai: Skip SpliceAI scoring.
@@ -434,8 +434,8 @@ def _check_startup_credentials() -> None:
     """
     if get_alphagenome_api_key() is None:
         sys.stderr.write(
-            "[oligoclaude-mcp] WARNING: no AlphaGenome API key in env/file.\n"
-            f"  Local: set ${ENV_VAR} or run `oligoclaude set-api-key <KEY>`.\n"
+            "[oligomcp-mcp] WARNING: no AlphaGenome API key in env/file.\n"
+            f"  Local: set ${ENV_VAR} or run `oligomcp set-api-key <KEY>`.\n"
             "  Remote: pass `alphagenome_api_key` per request to "
             "`predict_aso_efficacy_inline`.\n"
             "  SpliceAI-only runs (skip_alphagenome=true) work without a key.\n"

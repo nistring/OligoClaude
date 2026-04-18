@@ -241,11 +241,11 @@ def _default_n_models() -> int:
     ~1/5 the memory, and produces scores that rank ASO candidates
     consistently with the full 5-model ensemble (the between-model
     variance reduction matters most for absolute calibration, not for
-    ranking). Override with `OLIGOCLAUDE_SPLICEAI_N_MODELS=5` when full
+    ranking). Override with `OLIGOMCP_SPLICEAI_N_MODELS=5` when full
     ensemble accuracy is needed (e.g. final validation run after the
     top candidates have been narrowed).
     """
-    override = os.environ.get("OLIGOCLAUDE_SPLICEAI_N_MODELS", "").strip()
+    override = os.environ.get("OLIGOMCP_SPLICEAI_N_MODELS", "").strip()
     if override.isdigit():
         return max(1, int(override))
     return 1
@@ -264,7 +264,7 @@ def setup_spliceai(
     Number of models loaded is determined by `_default_n_models()` (see
     docstring): 5 locally, 1 on Horizon, override via env var.
 
-    Uses the vendored `SpliceAI` class from `oligoclaude._spliceai_model`
+    Uses the vendored `SpliceAI` class from `oligomcp._spliceai_model`
     (copied from openspliceai v0.0.5, MIT), so we avoid pulling in the
     `openspliceai` package and its C-extension transitive deps.
     """

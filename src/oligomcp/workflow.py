@@ -1,4 +1,4 @@
-"""End-to-end OligoClaude workflow — shared by CLI and MCP server."""
+"""End-to-end OligoMCP workflow — shared by CLI and MCP server."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -64,7 +64,7 @@ def run_workflow(
     verbose: bool = False,
     open_browser: bool = True,
 ) -> WorkflowResult:
-    """Run the full OligoClaude pipeline and return paths + stats."""
+    """Run the full OligoMCP pipeline and return paths + stats."""
     cfg = load_config(Path(config_path))
     cfg.results_dir = Path(cfg.results_dir) / "ASO"
     cfg.results_dir.mkdir(parents=True, exist_ok=True)

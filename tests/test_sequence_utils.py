@@ -1,7 +1,7 @@
 """Tests for sequence_utils."""
 import numpy as np
 
-from oligoclaude.core import one_hot_encode, reverse_complement
+from oligomcp.core import one_hot_encode, reverse_complement
 
 
 def test_reverse_complement_basic():

@@ -1,6 +1,6 @@
 """External resources: API credentials, GRCh38 FASTA, SpliceAI weights.
 
-All three are cached under ~/.oligoclaude/. The credentials file is written
+All three are cached under ~/.oligomcp/. The credentials file is written
 mode 0600; the genome and weight caches are plain files. A single
 `_download_with_progress` helper handles streaming + progress for both
 downloads (with optional gzip decode for the genome).
@@ -18,7 +18,7 @@ import warnings
 from pathlib import Path
 from typing import Optional
 
-BASE_DIR = Path.home() / ".oligoclaude"
+BASE_DIR = Path.home() / ".oligomcp"
 CRED_PATH = BASE_DIR / "credentials.json"
 GENOME_DIR = BASE_DIR / "genomes"
 HG38_FILENAME = "GRCh38.primary_assembly.genome.fa"
@@ -60,8 +60,8 @@ def get_alphagenome_api_key(cfg_value: Optional[str] = None) -> Optional[str]:
     if cfg_value and cfg_value.strip() and cfg_value.strip() not in _PLACEHOLDERS:
         warnings.warn(
             "dna_api_key is embedded in the config file. Move it to the "
-            f"{ENV_VAR} environment variable or run `oligoclaude set-api-key` "
-            "(saves to ~/.oligoclaude/credentials.json, mode 0600).",
+            f"{ENV_VAR} environment variable or run `oligomcp set-api-key` "
+            "(saves to ~/.oligomcp/credentials.json, mode 0600).",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -76,7 +76,7 @@ def require_alphagenome_api_key(cfg_value: Optional[str] = None) -> str:
         raise RuntimeError(
             "No AlphaGenome API key found. Set one of:\n"
             f"  - {ENV_VAR} environment variable\n"
-            f"  - Run: oligoclaude set-api-key <KEY>\n"
+            f"  - Run: oligomcp set-api-key <KEY>\n"
             "Or pass --skip-alphagenome to run without it."
         )
     return key
@@ -124,7 +124,7 @@ def _download_with_progress(
     """
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_suffix(dst.suffix + ".partial")
-    req = urllib.request.Request(url, headers={"User-Agent": "oligoclaude"})
+    req = urllib.request.Request(url, headers={"User-Agent": "oligomcp"})
     with urllib.request.urlopen(req, timeout=120) as resp:
         total = resp.headers.get("Content-Length") if hasattr(resp, "headers") else None
         total_int = int(total) if total and str(total).isdigit() else None
@@ -194,7 +194,7 @@ def resolve_fasta_path(
     if verbose:
         print(
             "No local FASTA — genomic sequences will be fetched on-the-fly "
-            "from the UCSC API. Run `oligoclaude fetch-genome` to cache "
+            "from the UCSC API. Run `oligomcp fetch-genome` to cache "
             "the full genome locally for offline use."
         )
     return None
@@ -210,7 +210,7 @@ def _mygene_detail(gene_symbol: str) -> dict:
         "size": 1,
     })
     hits_url = f"https://mygene.info/v3/query?{params}"
-    req = urllib.request.Request(hits_url, headers={"User-Agent": "oligoclaude/1.0"})
+    req = urllib.request.Request(hits_url, headers={"User-Agent": "oligomcp/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             hits_data = json.loads(resp.read().decode("utf-8"))
@@ -227,7 +227,7 @@ def _mygene_detail(gene_symbol: str) -> dict:
         raise RuntimeError(f"mygene.info hit missing _id for {gene_symbol!r}: {hits[0]}")
 
     detail_url = f"https://mygene.info/v3/gene/{gene_id}"
-    req = urllib.request.Request(detail_url, headers={"User-Agent": "oligoclaude/1.0"})
+    req = urllib.request.Request(detail_url, headers={"User-Agent": "oligomcp/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -320,7 +320,7 @@ def fetch_sequence_ucsc(assembly: str, chrom: str, start: int, end: int) -> str:
         "end": end,
     })
     url = f"https://api.genome.ucsc.edu/getData/sequence?{params}"
-    req = urllib.request.Request(url, headers={"User-Agent": "oligoclaude/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "oligomcp/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read().decode("utf-8"))
@@ -328,7 +328,7 @@ def fetch_sequence_ucsc(assembly: str, chrom: str, start: int, end: int) -> str:
         raise RuntimeError(
             f"Failed to fetch sequence from UCSC API for "
             f"{chrom}:{start}-{end} ({assembly}): {e}\n"
-            "If you are offline, run `oligoclaude fetch-genome` to download "
+            "If you are offline, run `oligomcp fetch-genome` to download "
             "the full GRCh38 FASTA for local use."
         ) from e
 
@@ -364,9 +364,9 @@ def ensure_spliceai_weights(
 
     Resolution order:
       1. Explicit `cache_dir` if complete.
-      2. Bundled copy inside the installed package (`oligoclaude/_spliceai_weights/`)
+      2. Bundled copy inside the installed package (`oligomcp/_spliceai_weights/`)
          — used on Prefect Horizon where FTP outbound is blocked.
-      3. User cache at `~/.oligoclaude/spliceai/mane_10000nt/`, downloading
+      3. User cache at `~/.oligomcp/spliceai/mane_10000nt/`, downloading
          any missing files from the FTP mirror.
     """
     if cache_dir is not None:

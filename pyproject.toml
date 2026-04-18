@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "oligoclaude"
+name = "oligomcp"
 version = "0.1.0"
-description = "ASO efficacy prediction using AlphaGenome and SpliceAI"
+description = "ASO efficacy prediction via AlphaGenome + SpliceAI, served as an MCP"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
@@ -21,34 +21,25 @@ dependencies = [
     "biopython>=1.83",
     "pyfaidx>=0.8",
     "tqdm>=4.66",
-    # Use `fastmcp` (Prefect's v2 FastMCP) instead of `mcp.server.fastmcp`
-    # (v1) — needed because fastmcp 2.12.3's CLI (Prefect Horizon's pinned
-    # runner) has a bug handling v1 FastMCP instances. fastmcp transitively
-    # depends on mcp, so we don't need to pin it separately.
     "fastmcp>=2.12",
     # Note: the `openspliceai` package is NOT a runtime dep — we vendor its
-    # pure-torch `SpliceAI` class in `oligoclaude._spliceai_model` to avoid
+    # pure-torch `SpliceAI` class in `oligomcp._spliceai_model` to avoid
     # its heavy transitive deps (`mappy` needs gcc; `pysam` has no Windows
-    # wheels). Pretrained weights are fetched at runtime from the upstream
-    # mirror. See the vendored file for attribution.
+    # wheels). Pretrained weights ship bundled (`_spliceai_weights/*.pt`).
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-cov>=5"]
 
 [project.scripts]
-oligoclaude = "oligoclaude.cli:main"
-oligoclaude-mcp = "oligoclaude.mcp_server:main"
+oligomcp = "oligomcp.cli:main"
+oligomcp-mcp = "oligomcp.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-oligoclaude = [
+oligomcp = [
     "py.typed",
-    # Ship the MANE-10000nt SpliceAI weight ensemble (~14 MB total) so that
-    # environments without outbound FTP — notably Prefect Horizon / FastMCP
-    # Cloud, where Lambda blocks ftp:// — can still run SpliceAI scoring
-    # without needing to fetch weights at runtime.
     "_spliceai_weights/*.pt",
 ]

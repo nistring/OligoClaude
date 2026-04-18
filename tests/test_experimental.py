@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 
-from oligoclaude.core import (
+from oligomcp.core import (
     AsoCandidate,
     aggregate_experimental_candidates,
     match_scores_to_experimental,

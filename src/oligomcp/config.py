@@ -1,4 +1,4 @@
-"""Config loading and validation for OligoClaude."""
+"""Config loading and validation for OligoMCP."""
 from __future__ import annotations
 
 import json

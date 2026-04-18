@@ -1,4 +1,4 @@
-"""CLI entrypoint for OligoClaude."""
+"""CLI entrypoint for OligoMCP."""
 from __future__ import annotations
 
 import argparse
@@ -9,7 +9,7 @@ from pathlib import Path
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="oligoclaude",
+        prog="oligomcp",
         description="Predict ASO efficacy via AlphaGenome and SpliceAI.",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -56,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("clear-api-key", help="Remove the saved AlphaGenome API key.")
 
     for name, helptxt in [
-        ("fetch-genome", "Download GRCh38 FASTA to ~/.oligoclaude/genomes/."),
+        ("fetch-genome", "Download GRCh38 FASTA to ~/.oligomcp/genomes/."),
         ("fetch-spliceai-weights", "Download the MANE-10000nt ensemble."),
     ]:
         f = sub.add_parser(name, help=helptxt)
@@ -128,7 +128,7 @@ def _cmd_init(args) -> int:
         save_alphagenome_api_key,
     )
 
-    print("=== OligoClaude one-time setup ===")
+    print("=== OligoMCP one-time setup ===")
 
     if args.skip_spliceai:
         print("\n[1/2] Skipping SpliceAI weight download (--skip-spliceai).")
@@ -139,23 +139,23 @@ def _cmd_init(args) -> int:
             print(f"  ✓ Weights ready at: {path}")
         except Exception as e:
             print(f"  ! SpliceAI weight download failed: {e}")
-            print("    You can retry later with `oligoclaude fetch-spliceai-weights`.")
+            print("    You can retry later with `oligomcp fetch-spliceai-weights`.")
 
     print("\n[2/2] AlphaGenome API key")
     existing = get_alphagenome_api_key()
     if existing:
         print("  ✓ An AlphaGenome API key is already configured. Skipping.")
     elif args.skip_api_key:
-        print("  Skipping (--skip-api-key). Save one later with `oligoclaude set-api-key`.")
+        print("  Skipping (--skip-api-key). Save one later with `oligomcp set-api-key`.")
     elif args.yes or not sys.stdin.isatty():
         print(
             f"  Non-interactive mode — skipping prompt.\n"
-            f"  Set ${ENV_VAR} or run `oligoclaude set-api-key <KEY>` before running."
+            f"  Set ${ENV_VAR} or run `oligomcp set-api-key <KEY>` before running."
         )
     else:
         print(
             "  Get a free key at https://deepmind.google.com/science/alphagenome\n"
-            "  (Leave blank to skip — you can set it later with `oligoclaude set-api-key`.)"
+            "  (Leave blank to skip — you can set it later with `oligomcp set-api-key`.)"
         )
         try:
             key = getpass.getpass("  AlphaGenome API key (hidden, or Enter to skip): ").strip()
@@ -169,12 +169,12 @@ def _cmd_init(args) -> int:
             except ValueError as e:
                 print(f"  ! {e}")
         else:
-            print("  Skipped. Save one later with `oligoclaude set-api-key`.")
+            print("  Skipped. Save one later with `oligomcp set-api-key`.")
 
     print(
         "\nSetup complete. Genomic sequences are fetched on-the-fly from the UCSC API —\n"
         "no multi-GB genome download is required. Try:\n"
-        "  oligoclaude run --config config/SETD5_e1.json -v"
+        "  oligomcp run --config config/SETD5_e1.json -v"
     )
     return 0
 

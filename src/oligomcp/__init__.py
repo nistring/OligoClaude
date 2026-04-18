@@ -1,4 +1,4 @@
-"""OligoClaude: ASO efficacy prediction via AlphaGenome and SpliceAI."""
+"""OligoMCP: ASO efficacy prediction via AlphaGenome and SpliceAI."""
 
 from .config import OligoConfig, load_config
 from .core import AsoCandidate, enumerate_sliding, enumerate_from_experimental

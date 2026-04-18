@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from oligoclaude.config import load_config
+from oligomcp.config import load_config
 
 
 def _write_cfg(tmp_path: Path, **overrides) -> Path:
