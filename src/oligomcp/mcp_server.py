@@ -12,6 +12,11 @@ Tools exposed:
 - `list_gene_exons(gene_symbol, assembly)` — discover exons of a gene's
   canonical transcript (mygene.info, no AlphaGenome key needed).
 
+- `search_ontology_terms(query, …)` — substring-search the AlphaGenome
+  ontology-term snapshot to find CURIEs matching a tissue/cell-type
+  description (e.g. "motor neuron", "liver"). Use before a scoring
+  call to populate the `ontology_terms` argument.
+
 - `predict_aso_efficacy_inline(gene_symbol, exon_intervals, ...)` — run
   the full workflow from tool arguments (no config file, no disk).
   Returns CSV + BED content inline. Convenient whenever you'd rather
@@ -186,6 +191,110 @@ def list_gene_exons(gene_symbol: str, assembly: str = "hg38") -> dict:
         "cdsstart": cdsstart,
         "cdsend": cdsend,
         "exons": annotated,
+    }
+
+
+# Path to the ontology TSV shipped with the repo. Editable install =
+# this lands next to the checked-out data/ dir; for a plain pip install
+# users would have to regenerate via `scripts/fetch_ontology_terms.py`
+# against their own repo clone.
+_ONTOLOGY_TSV = Path(__file__).resolve().parents[2] / "data" / "alphagenome_ontology_terms.tsv"
+_ONTOLOGY_CACHE: Optional[list[dict]] = None
+
+
+def _load_ontology_terms() -> list[dict]:
+    """Lazily load + cache the ontology-term snapshot as a list of dicts."""
+    global _ONTOLOGY_CACHE
+    if _ONTOLOGY_CACHE is not None:
+        return _ONTOLOGY_CACHE
+    if not _ONTOLOGY_TSV.exists():
+        _ONTOLOGY_CACHE = []
+        return _ONTOLOGY_CACHE
+    import pandas as pd
+
+    df = pd.read_csv(_ONTOLOGY_TSV, sep="\t", dtype=str, keep_default_na=False)
+    _ONTOLOGY_CACHE = df.to_dict(orient="records")
+    return _ONTOLOGY_CACHE
+
+
+@mcp.tool()
+def search_ontology_terms(
+    query: str = "",
+    output_type: Optional[str] = None,
+    limit: int = 20,
+) -> dict:
+    """Search AlphaGenome's ontology-term snapshot by tissue/cell-type text.
+
+    Use this before calling `predict_aso_efficacy*` whenever the user
+    hints at a specific biological context ("motor neuron", "liver",
+    "iPSC-derived neuron", "GTEx brain cortex", …) so you can populate
+    `ontology_terms` with CURIEs that AlphaGenome actually has tracks
+    for. Leaving `ontology_terms` empty makes AlphaGenome average over
+    every track it returns, which is usually not what the user wants
+    when they mentioned a specific tissue.
+
+    Matching is case-insensitive substring over `ontology_curie`,
+    `biosample_name`, `biosample_type`, `biosample_life_stage`, and
+    `gtex_tissue`. Multiple whitespace-separated tokens are AND'd —
+    every token must appear in at least one of those fields.
+
+    Args:
+        query: Free-form search text. Empty string + no output_type
+            filter returns the first `limit` rows alphabetically.
+        output_type: Optional filter — only return terms that have at
+            least one track in this AlphaGenome output type (e.g.
+            "rna_seq", "splice_site_usage", "atac").
+        limit: Maximum rows to return (default 20).
+
+    Returns:
+        status: "ok" | "no_snapshot"
+        total: int — number of CURIEs matching (before limit).
+        limit: int — echoed limit.
+        results: list of matching rows with keys `ontology_curie`,
+            `biosample_name`, `biosample_type`, `biosample_life_stage`,
+            `gtex_tissue`, `available_outputs`, `total_tracks`.
+        snapshot_path: str — location of the TSV used for lookup.
+        hint: str — explanatory message when there's no snapshot.
+    """
+    rows = _load_ontology_terms()
+    if not rows:
+        return {
+            "status": "no_snapshot",
+            "snapshot_path": str(_ONTOLOGY_TSV),
+            "hint": (
+                "Ontology snapshot not found. Run `python scripts/fetch_ontology_terms.py` "
+                "from the project root (requires an AlphaGenome API key) to regenerate it."
+            ),
+        }
+
+    tokens = [t.lower() for t in (query or "").split() if t.strip()]
+    out_filter = (output_type or "").strip().lower()
+
+    def _row_matches(r: dict) -> bool:
+        hay = " ".join(
+            str(r.get(k, "")) for k in (
+                "ontology_curie",
+                "biosample_name",
+                "biosample_type",
+                "biosample_life_stage",
+                "gtex_tissue",
+            )
+        ).lower()
+        if not all(tok in hay for tok in tokens):
+            return False
+        if out_filter:
+            available = str(r.get("available_outputs", "")).lower()
+            if out_filter not in available.split(","):
+                return False
+        return True
+
+    matches = [r for r in rows if _row_matches(r)]
+    return {
+        "status": "ok",
+        "total": len(matches),
+        "limit": limit,
+        "results": matches[: max(0, int(limit))],
+        "snapshot_path": str(_ONTOLOGY_TSV),
     }
 
 

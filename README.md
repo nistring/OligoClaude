@@ -154,6 +154,12 @@ Per-client paths:
 - `list_gene_exons(gene_symbol, assembly="hg38")` — canonical-transcript
   exons via mygene.info, annotated CDS / UTR / first / last. No
   AlphaGenome key needed.
+- `search_ontology_terms(query, output_type=None, limit=20)` —
+  substring search over the committed
+  `data/alphagenome_ontology_terms.tsv` snapshot (704 CURIEs) so the
+  MCP client can pick the right `ontology_terms` from a description
+  like "motor neuron" or "liver". Multiple whitespace-separated
+  tokens are AND'd. No AlphaGenome key needed.
 - `predict_aso_efficacy(config_path, ...)` — file-based scoring.
   Returns `status="needs_info"` if design-critical fields
   (`ASO_length`, `aso_step`, `flank`, `target_mode`) are missing so
