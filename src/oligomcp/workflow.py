@@ -153,14 +153,14 @@ def run_workflow(
         from .predict import score_asos_spliceai, setup_spliceai
 
         sai_models, _ = setup_spliceai(cfg.spliceai_threads)
-        sai_results = score_asos_spliceai(
+        sai_scores = score_asos_spliceai(
             cfg,
             candidates,
             chrom=chrom,
             variant_interval_start_genomic=ref_anchor_genomic,
             models=sai_models,
         )
-        all_scores.update(sai_results)
+        all_scores["SpliceAI"] = sai_scores
 
     scores_df = pd.DataFrame(
         {
@@ -207,10 +207,7 @@ def run_workflow(
                     f"Wrote {matched_csv} ({len(matched)} experimental rows)"
                 )
 
-            # Plot the primary (fractional) columns only — the `_raw`
-            # siblings rank identically, so adding them just crowds the
-            # panel with collinear lines.
-            score_cols = [k for k in all_scores if not k.endswith("_raw")]
+            score_cols = list(all_scores.keys())
             correlation_png = cfg.results_dir / f"{cfg.config_name}_correlation.png"
             stats = correlation_plot(
                 matched_df=matched,

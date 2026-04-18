@@ -49,32 +49,30 @@ _FRAC_EPS = 1e-6     # stabilizer for (raw / |ref[target]|) when baseline is ~0
 _BODY_EPS = 1e-12    # stabilizer for alt[body] / ref[body]
 
 
-def _score_pair(
+def diff_mean_frac(
     ref: np.ndarray,
     alt: np.ndarray,
     target_sel,
     body_sel,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Compute the `diff_mean` raw score AND its fractional-of-baseline form.
+) -> np.ndarray:
+    """Body-corrected fractional change of `alt` vs `ref` at `target`.
 
-    Both scores follow the same shape:
-
+        α    = alt[body].mean / (ref[body].mean + BODY_EPS)
         raw  = α · alt[target].mean − ref[target].mean
         frac = raw / (|ref[target].mean| + FRAC_EPS)
 
-    where α = alt[body].mean / ref[body].mean applies a global amplitude
-    correction (useful for coverage-like tracks, ≈ 1 for sparse tracks).
+    `α` is a global amplitude correction: meaningful for coverage-like
+    tracks whose body mean shifts under masking, ≈ 1 for sparse tracks
+    where body is mostly zero.
 
-    `target_sel` / `body_sel` may be a slice (`slice(start, end)`) or an
-    int index array. `ref` has shape (L,) or (L, 1); `alt` has shape
-    (L,) or (L, num_variants). Returned arrays are shape (num_variants,)
-    or scalar, matching the second axis of `alt`.
+    `target_sel` / `body_sel` may be a `slice` or an int index array.
+    `ref` shape (L,) or (L, 1); `alt` shape (L,) or (L, num_variants).
+    Returned array shape matches the 2nd axis of `alt` (scalar or
+    num_variants,).
 
-    raw retains the backend's native units (coverage / SSU fraction /
-    softmax probability). frac is dimensionless — "fraction of the
-    reference-at-target signal that the alt perturbation displaces",
-    negative = ASO reduces the signal. The two have identical rankings
-    (frac divides by a per-run constant), so choice is presentational.
+    Returns the dimensionless fractional-of-baseline score. Negative =
+    ASO reduces the reference signal (skip-promoting); positive =
+    amplifies it (inclusion-enhancing).
     """
     ref_target = ref[target_sel].mean(0)
     alt_target = alt[target_sel].mean(0)
@@ -82,39 +80,7 @@ def _score_pair(
     alt_body = alt[body_sel].mean(0)
     alpha = alt_body / (ref_body + _BODY_EPS)
     raw = alpha * alt_target - ref_target
-    frac = raw / (np.abs(ref_target) + _FRAC_EPS)
-    return raw, frac
-
-
-def diff_mean(
-    ref: np.ndarray,
-    alt: np.ndarray,
-    start: int,
-    end: int,
-    gene_start: int,
-    gene_end: int,
-) -> np.ndarray:
-    """Difference-of-means score (raw units). `ref`/`alt` shape (L, num_variants)."""
-    raw, _ = _score_pair(ref, alt, slice(start, end), slice(gene_start, gene_end))
-    return raw
-
-
-def diff_mean_at(
-    ref: np.ndarray,
-    alt: np.ndarray,
-    target_indices: np.ndarray,
-    gene_start: int,
-    gene_end: int,
-) -> np.ndarray:
-    """`diff_mean` where the target region is an arbitrary set of indices.
-
-    Used for junction-only splice scoring: instead of averaging a
-    splice-site-usage track over the whole exon (which dilutes peaked
-    junction signal with ~200 near-zero bases), we take the mean at
-    just the acceptor and donor positions.
-    """
-    raw, _ = _score_pair(ref, alt, target_indices, slice(gene_start, gene_end))
-    return raw
+    return raw / (np.abs(ref_target) + _FRAC_EPS)
 
 
 # ============================================================
@@ -294,12 +260,8 @@ def score_asos_alphagenome(
         else:
             target_sel = slice(ctx.exon_start_rel, ctx.exon_end_rel)
         body_sel = slice(ctx.gene_start_rel, ctx.gene_end_rel)
-        raw, frac = _score_pair(ref_arr, alt_arr, target_sel, body_sel)
-        # Primary column = dimensionless fractional-of-baseline score.
-        # `_raw` column preserves the old absolute-unit score for
-        # reproducibility + debugging; rankings are identical.
+        frac = diff_mean_frac(ref_arr, alt_arr, target_sel, body_sel)
         results[output_type.name] = np.asarray(frac, dtype=np.float32)
-        results[f"{output_type.name}_raw"] = np.asarray(raw, dtype=np.float32)
     return results
 
 
@@ -458,17 +420,14 @@ def score_asos_spliceai(
     chrom: str,
     variant_interval_start_genomic: int,
     models: Optional[list[Any]] = None,
-) -> dict[str, np.ndarray]:
-    """Score each candidate via `diff_mean` on donor+acceptor probabilities.
+) -> np.ndarray:
+    """Score each candidate via `diff_mean_frac` on donor+acceptor probabilities.
 
     `candidates[i].position` is the offset within ref_seq;
     `variant_interval_start_genomic` is the genomic position of ref_seq[0].
 
-    Returns a dict with two keys:
-        "SpliceAI"     — dimensionless fractional-of-baseline score (primary).
-        "SpliceAI_raw" — the old raw-unit diff_mean for reproducibility.
-    Rankings are identical across the two; frac is only divided by a
-    per-run constant.
+    Returns a dimensionless per-candidate array. Negative = ASO reduces
+    junction probability (skip-promoting).
     """
     if models is None:
         models, _ = setup_spliceai(cfg.spliceai_threads)
@@ -486,12 +445,10 @@ def score_asos_spliceai(
     # base). Averaging over the 200+ bp exon would dilute the peaked
     # softmax signal with hundreds of ~0 bases.
     junction_idx = np.array([exon_a, exon_b - 1], dtype=int)
-    # Pre-compute the per-run reference baseline needed by _score_pair.
-    # Shape (L, 1) so `_score_pair` broadcasts cleanly with alt (L, B).
+    # Shape (L, 1) so `diff_mean_frac` broadcasts cleanly with alt (L, B).
     ref_arr = ref_signal[:, None]
 
-    raw_scores = np.zeros(len(candidates), dtype=np.float32)
-    frac_scores = np.zeros(len(candidates), dtype=np.float32)
+    scores = np.zeros(len(candidates), dtype=np.float32)
     batch_size = max(1, int(cfg.spliceai_batch))
     print(
         f"SpliceAI: scoring {len(candidates)} ASOs on CPU "
@@ -513,20 +470,17 @@ def score_asos_spliceai(
             batch_input[i, :, rel_start:rel_end] = 0.25
 
         alt_out = _forward_ensemble(models, batch_input)
-        # alt_arr shape (L, B) so the same _score_pair broadcasting pattern
+        # alt_arr shape (L, B) so the same diff_mean_frac broadcasting pattern
         # used for AlphaGenome applies.
         alt_arr = (alt_out[:, 1] + alt_out[:, 2]).cpu().numpy().astype(np.float32).T
-        raw, frac = _score_pair(
-            ref_arr, alt_arr, junction_idx, slice(0, SL)
+        frac = np.asarray(
+            diff_mean_frac(ref_arr, alt_arr, junction_idx, slice(0, SL)),
+            dtype=np.float32,
         )
-        raw = np.asarray(raw, dtype=np.float32)
-        frac = np.asarray(frac, dtype=np.float32)
-        raw[~valid] = np.nan
         frac[~valid] = np.nan
-        raw_scores[start : start + B] = raw
-        frac_scores[start : start + B] = frac
+        scores[start : start + B] = frac
 
         if (start // batch_size) % 10 == 0 or start + B >= len(candidates):
             print(f"  SpliceAI progress: {min(start + B, len(candidates))}/{len(candidates)}")
 
-    return {"SpliceAI": frac_scores, "SpliceAI_raw": raw_scores}
+    return scores
