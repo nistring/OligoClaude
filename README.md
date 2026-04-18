@@ -68,6 +68,16 @@ Full schema (every optional field):
 
 See `config/SETD5_e1.json` and `config/SMN2.json` for real examples.
 
+**Picking `ontology_terms`** — a snapshot of every CURIE AlphaGenome
+exposes (704 terms spanning cell types, tissues, cell lines, etc.) is
+committed at `data/alphagenome_ontology_terms.tsv`. Each row lists
+the CURIE, the biosample name/type/life stage, and which AlphaGenome
+output tracks it covers. Drop any CURIE (e.g. `CL:0000127`,
+`UBERON:0002240`) into the `ontology_terms` list; an empty list means
+"average over every track AlphaGenome returns". Regenerate the
+snapshot against the live API with
+`python scripts/fetch_ontology_terms.py`.
+
 ## Quick start — MCP
 
 Register the stdio server with your MCP-capable client, then prompt in

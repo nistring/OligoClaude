@@ -1,0 +1,8 @@
+Generated at: 2026-04-18T17:21:44.517318+00:00
+AlphaGenome version: 0.5.1
+Unique ontology CURIEs: 704
+Outputs covered: ['atac', 'cage', 'chip_histone', 'chip_tf', 'contact_maps', 'dnase', 'procap', 'rna_seq', 'splice_junctions', 'splice_site_usage']
+
+Usage: drop any CURIE (e.g. CL:0000127, UBERON:0002240) into
+the `ontology_terms` list of an OligoMCP config. Empty list =
+average over every track AlphaGenome returns.
