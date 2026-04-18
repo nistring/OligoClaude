@@ -18,12 +18,6 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--config", type=Path, required=True)
     r.add_argument("--skip-alphagenome", action="store_true")
     r.add_argument("--skip-spliceai", action="store_true")
-    r.add_argument(
-        "--samples-max",
-        type=int,
-        default=20,
-        help="Top/bottom ASOs to emit in compact BED (does not affect correlation).",
-    )
     r.add_argument("--verbose", "-v", action="store_true")
 
     i = sub.add_parser(
@@ -76,7 +70,6 @@ def _cmd_run(args) -> int:
         config_path=args.config,
         skip_alphagenome=args.skip_alphagenome,
         skip_spliceai=args.skip_spliceai,
-        samples_max=args.samples_max,
         verbose=args.verbose,
     )
     print()

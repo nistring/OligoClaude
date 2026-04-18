@@ -106,14 +106,13 @@ def write_bed(
     candidates: list[AsoCandidate],
     scores: np.ndarray,
     variant_interval_start: int,
-    samples_max: int = 20,
-) -> tuple[Path, Path]:
-    """Write compact (top/bottom-N) and full BED files for one score source.
+) -> Path:
+    """Write one BED file covering every scored candidate.
 
     `candidates[i].position` is the ref_seq offset; absolute genomic starts
     are `variant_interval_start + position`. The BED strand is inverted
-    relative to the config strand (ASO binds the opposite strand). Positive
-    scores get a red-gradient itemRgb, negative scores get blue.
+    relative to the config strand (ASO binds the opposite strand).
+    Positive scores get a red-gradient itemRgb, negative scores get blue.
     """
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -123,32 +122,20 @@ def write_bed(
     pos = sorted([p for p in pairs if p[1] > 0], key=lambda x: -x[1])
     neg = sorted([p for p in pairs if p[1] < 0], key=lambda x: x[1])
 
-    def _render(pos_sel, neg_sel):
-        return _safe_concat([
-            _build_rows(pos_sel, chrom, bed_strand, variant_interval_start, invert=False),
-            _build_rows(neg_sel, chrom, bed_strand, variant_interval_start, invert=True),
-        ])
+    df = _safe_concat([
+        _build_rows(pos, chrom, bed_strand, variant_interval_start, invert=False),
+        _build_rows(neg, chrom, bed_strand, variant_interval_start, invert=True),
+    ])
 
-    compact_df = _render(pos[:samples_max], neg[:samples_max])
-    full_df = _render(pos, neg)
-
-    compact_path = results_dir / f"{config_name}_ASO_{source}.bed"
-    full_path = results_dir / f"{config_name}_ASO_{source}_full.bed"
+    path = results_dir / f"{config_name}_{source}.bed"
     _write_track(
-        compact_path,
-        f'track name={config_name}_ASO_{source} '
+        path,
+        f'track name={config_name}_{source} '
         f'description="ASO scores for {source}" visibility="pack" useScore=1 '
         f'itemRgb="On"',
-        compact_df,
+        df,
     )
-    _write_track(
-        full_path,
-        f'track name={config_name}_ASO_{source}_full '
-        f'description="Full ASO scores for {source}" visibility="pack" useScore=1 '
-        f'itemRgb="On"',
-        full_df,
-    )
-    return compact_path, full_path
+    return path
 
 
 def export_all(
@@ -157,14 +144,13 @@ def export_all(
     variant_interval_start: int,
     candidates: list[AsoCandidate],
     all_scores: dict[str, np.ndarray],
-    samples_max: int = 20,
 ) -> list[Path]:
-    """Write a pair of BED files per score source."""
+    """Write one BED file per score source covering every scored candidate."""
     written: list[Path] = []
     for source, arr in all_scores.items():
         if arr is None or len(arr) == 0:
             continue
-        compact, full = write_bed(
+        path = write_bed(
             results_dir=cfg.results_dir,
             config_name=cfg.config_name,
             source=source,
@@ -173,9 +159,8 @@ def export_all(
             candidates=candidates,
             scores=np.asarray(arr, dtype=np.float32),
             variant_interval_start=variant_interval_start,
-            samples_max=samples_max,
         )
-        written.extend([compact, full])
+        written.append(path)
     return written
 
 
@@ -221,10 +206,10 @@ def write_experimental_bed(
             "itemRgb": f"0,{int(intensity)},0",
         })
 
-    path = results_dir / f"{config_name}_ASO_Measured.bed"
+    path = results_dir / f"{config_name}_Measured.bed"
     _write_track(
         path,
-        f'track name={config_name}_ASO_Measured '
+        f'track name={config_name}_Measured '
         f'description="Measured RT-PCR" visibility="pack" useScore=1 '
         f'itemRgb="On"',
         pd.DataFrame(rows),

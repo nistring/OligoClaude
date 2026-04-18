@@ -91,9 +91,9 @@ JBrowse, etc.
 
 | File | Contents |
 |---|---|
-| `<name>_ASO_scores.csv` | Per-ASO scores across all sources |
-| `<name>_ASO_<source>.bed` / `_full.bed` | Custom tracks — red = inclusion-enhancing, blue = skip-promoting |
-| `<name>_ASO_Measured.bed` | Green-gradient RT-PCR track (if `experimental_data` set) |
+| `<name>_scores.csv` | Per-ASO scores across all sources |
+| `<name>_<source>.bed` | Custom tracks (one file per source, every candidate) — red = inclusion-enhancing, blue = skip-promoting |
+| `<name>_Measured.bed` | Green-gradient RT-PCR track (if `experimental_data` set) |
 | `<name>_correlation.png` | Per-exon regression with percentile-rank x-axis |
 | `<name>_experimental_matched.csv` | Aggregated predictions ↔ measured |
 

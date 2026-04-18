@@ -41,7 +41,6 @@ def run_workflow(
     *,
     skip_alphagenome: bool = False,
     skip_spliceai: bool = False,
-    samples_max: int = 20,
     verbose: bool = False,
 ) -> WorkflowResult:
     """Run the full OligoMCP pipeline and return paths + stats."""
@@ -175,7 +174,7 @@ def run_workflow(
     if any(c.exon_label is not None for c in candidates):
         scores_df["Region (Exon)"] = [c.exon_label for c in candidates]
 
-    scores_csv = cfg.results_dir / f"{cfg.config_name}_ASO_scores.csv"
+    scores_csv = cfg.results_dir / f"{cfg.config_name}_scores.csv"
     scores_df.to_csv(scores_csv, index=False)
     if verbose:
         print(f"Wrote {scores_csv}")
@@ -186,7 +185,6 @@ def run_workflow(
         variant_interval_start=ref_anchor_genomic,
         candidates=candidates,
         all_scores=all_scores,
-        samples_max=samples_max,
     )
 
     correlation_png: Optional[Path] = None

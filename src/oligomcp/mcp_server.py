@@ -339,7 +339,9 @@ def predict_aso_efficacy_inline(
             against your quota; requires $ALPHAGENOME_API_KEY in the
             server environment).
         skip_spliceai: Skip SpliceAI scoring (CPU-heavy ~0.25s/candidate).
-        samples_max: Top/bottom ASOs to include in the compact BED (default 20).
+        samples_max: Max hits per source in the returned `top_candidates`
+            list (default 20). Does not affect the BED files on disk —
+            those always contain every scored candidate.
         requested_outputs: AlphaGenome output types; defaults to
             ["RNA_SEQ", "SPLICE_SITE_USAGE"].
         ontology_terms: AlphaGenome ontology terms (cell types). Optional.
@@ -414,7 +416,6 @@ def predict_aso_efficacy_inline(
                 cfg_path,
                 skip_alphagenome=skip_alphagenome,
                 skip_spliceai=skip_spliceai,
-                samples_max=samples_max,
             )
         except ExonIntervalsRequired as e:
             return {
@@ -423,11 +424,7 @@ def predict_aso_efficacy_inline(
             }
 
     scores = _scores_from_csv(result.scores_csv)
-    compact_beds = {
-        p.name: p.read_text()
-        for p in result.bed_files
-        if p.exists() and not p.name.endswith("_full.bed")
-    }
+    compact_beds = {p.name: p.read_text() for p in result.bed_files if p.exists()}
 
     score_cols = [
         c for c in (scores[0].keys() if scores else [])
@@ -467,7 +464,6 @@ def predict_aso_efficacy(
     config_path: str,
     skip_alphagenome: bool = False,
     skip_spliceai: bool = False,
-    samples_max: int = 20,
     confirm_defaults: bool = False,
 ) -> dict:
     """Predict ASO efficacy from a JSON config file.
@@ -482,7 +478,6 @@ def predict_aso_efficacy(
         config_path: Absolute path to an OligoMCP JSON config.
         skip_alphagenome: Skip AlphaGenome scoring (no API key needed).
         skip_spliceai: Skip SpliceAI scoring.
-        samples_max: Top/bottom ASOs per compact BED track.
         confirm_defaults: When False (default), the tool returns
             `status="needs_info"` if the JSON omits any design-critical
             field (ASO_length, aso_step, flank, target_mode) so Claude can
@@ -521,7 +516,6 @@ def predict_aso_efficacy(
             cfg_path,
             skip_alphagenome=skip_alphagenome,
             skip_spliceai=skip_spliceai,
-            samples_max=samples_max,
         )
     except ExonIntervalsRequired as e:
         return {
